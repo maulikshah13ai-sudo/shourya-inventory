@@ -33,8 +33,8 @@ def get_settings():
     if row:
         return dict(row)
     return {
-        "shop_name": "Apex Footwear & Bags Hub",
-        "tagline": "Wholesale & Retail Dealers",
+        "shop_name": "SSIPL Bags & Footwear Hub",
+        "tagline": "Wholesale & Retail Dealers in Bags & Footwear",
         "phone": "+91 98765 43210",
         "address": "Market Complex",
         "tax_number": "",
@@ -926,4 +926,5 @@ if __name__ == '__main__':
     print("    Accounting / Cashier: accounts / accounts123")
     print("    Warehouse Manager:    godown   / godown123")
     print("=" * 65)
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=False)

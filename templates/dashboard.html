@@ -5,21 +5,20 @@
 {% block content %}
 <div class="space-y-6">
 
-    <!-- Multi-Device Wi-Fi Connection Banner -->
+    <!-- Cloud & Mobile Access Banner -->
     <div class="bg-gradient-to-r from-slate-900 to-indigo-900 text-white p-4 rounded-2xl shadow-sm flex flex-col sm:flex-row items-center justify-between gap-4">
         <div class="flex items-center gap-3">
-            <div class="w-10 h-10 rounded-xl bg-sky-500/20 text-sky-400 flex items-center justify-center shrink-0">
-                <i data-lucide="wifi" class="w-5 h-5"></i>
+            <div class="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
+                <i data-lucide="globe" class="w-5 h-5"></i>
             </div>
             <div>
-                <h4 class="font-bold text-sm text-white">Multi-User Shop Network Active</h4>
-                <p class="text-xs text-slate-300">Salesmen, godown, and accounting staff can open the app on their phones/laptops:</p>
+                <h4 class="font-bold text-sm text-white">Cloud Inventory Portal Active</h4>
+                <p class="text-xs text-slate-300">Staff can access this portal from anywhere in the world on mobile data, home, or shop Wi-Fi:</p>
             </div>
         </div>
         <div class="flex items-center gap-2">
-            <span class="text-xs text-slate-400">Shop Wi-Fi URL:</span>
             <span class="px-3 py-1.5 rounded-lg bg-black/40 text-emerald-400 font-mono font-bold text-sm border border-emerald-500/30">
-                http://{{ local_ip }}:5000
+                inventory.shouryastitchindustries.com
             </span>
         </div>
     </div>
