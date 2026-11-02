@@ -1,0 +1,526 @@
+{% extends 'base.html' %}
+
+{% block title %}POS / Quick Billing{% endblock %}
+
+{% block content %}
+<div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+    <!-- Left Side: Product Selector & Search (7 Cols) -->
+    <div class="lg:col-span-7 space-y-4">
+        
+        <!-- Sale Type Banner & Mode Switch -->
+        <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div class="flex items-center gap-2">
+                <span class="text-sm font-bold text-slate-700">Billing Mode:</span>
+                <div class="inline-flex p-1 rounded-xl bg-slate-100 border border-slate-200 text-xs font-bold">
+                    <button type="button" id="btnModeRetail" onclick="setBillingMode('RETAIL')" class="px-4 py-2 rounded-lg transition bg-white text-emerald-700 shadow-xs flex items-center gap-1.5">
+                        <i data-lucide="user" class="w-4 h-4"></i> Retail (MRP)
+                    </button>
+                    <button type="button" id="btnModeWholesale" onclick="setBillingMode('WHOLESALE')" class="px-4 py-2 rounded-lg transition text-slate-600 hover:text-slate-900 flex items-center gap-1.5">
+                        <i data-lucide="truck" class="w-4 h-4"></i> Wholesale (Bulk)
+                    </button>
+                </div>
+            </div>
+
+            <!-- Quick Filter Tabs (All / Bags / Shoes) -->
+            <div class="flex items-center gap-1 text-xs">
+                <button type="button" onclick="filterCatalog('')" class="cat-pill active px-3 py-1.5 rounded-lg font-bold bg-slate-800 text-white transition">All</button>
+                <button type="button" onclick="filterCatalog('Bags')" class="cat-pill px-3 py-1.5 rounded-lg font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 transition">🎒 Bags</button>
+                <button type="button" onclick="filterCatalog('Shoes')" class="cat-pill px-3 py-1.5 rounded-lg font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 transition">👞 Shoes</button>
+            </div>
+        </div>
+
+        <!-- Search Bar with Barcode Scanner compatibility -->
+        <div class="relative">
+            <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+                <i data-lucide="search" class="w-5 h-5"></i>
+            </div>
+            <input type="text" id="posSearch" placeholder="Search by Model name, SKU barcode, Brand, or Size (e.g. 'Sneakers', 'UK 8', 'BAG-001')..."
+                   class="w-full pl-11 pr-4 py-3 bg-white border-2 border-slate-200 rounded-2xl text-sm focus:border-sky-500 focus:outline-none shadow-sm transition"
+                   autocomplete="off" onkeyup="handleSearch()">
+        </div>
+
+        <!-- Product Grid Catalog -->
+        <div id="productGrid" class="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-[560px] overflow-y-auto pr-1">
+            {% for p in products %}
+            <div class="product-card bg-white p-3.5 rounded-xl border border-slate-200 hover:border-sky-400 hover:shadow-md transition cursor-pointer flex flex-col justify-between"
+                 data-id="{{ p.id }}"
+                 data-sku="{{ p.sku }}"
+                 data-name="{{ p.name }}"
+                 data-category="{{ p.category }}"
+                 data-size="{{ p.size or '' }}"
+                 data-color="{{ p.color or '' }}"
+                 data-unit="{{ p.unit }}"
+                 data-cost="{{ p.cost_price }}"
+                 data-wholesale="{{ p.wholesale_price }}"
+                 data-retail="{{ p.retail_price }}"
+                 data-stock="{{ p.stock_qty }}"
+                 onclick="addToCartFromCard(this)">
+                <div>
+                    <div class="flex items-center justify-between gap-2">
+                        <span class="text-[10px] font-black uppercase px-2 py-0.5 rounded {% if p.category == 'Shoes' %}bg-amber-100 text-amber-800{% else %}bg-purple-100 text-purple-800{% endif %}">
+                            {{ p.category }}
+                        </span>
+                        <span class="text-xs font-mono text-slate-400">{{ p.sku }}</span>
+                    </div>
+
+                    <h4 class="font-bold text-slate-800 text-sm mt-1 leading-snug">{{ p.name }}</h4>
+                    <p class="text-xs text-slate-500 mt-0.5">
+                        {% if p.size %}<span class="bg-slate-100 px-1.5 py-0.5 rounded text-[11px] font-semibold text-slate-700">Size: {{ p.size }}</span>{% endif %}
+                        {% if p.color %}<span class="bg-slate-100 px-1.5 py-0.5 rounded text-[11px] font-semibold text-slate-700 ml-1">{{ p.color }}</span>{% endif %}
+                    </p>
+                </div>
+
+                <div class="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between">
+                    <div>
+                        <div class="text-xs text-slate-400">
+                            WS: <span class="font-medium text-indigo-700">{{ settings.currency_symbol }}{{ p.wholesale_price }}</span>
+                        </div>
+                        <div class="text-sm font-black text-slate-900 price-display">
+                            {{ settings.currency_symbol }}{{ p.retail_price }}
+                        </div>
+                    </div>
+                    <div class="text-right">
+                        <span class="inline-block px-2 py-0.5 rounded text-xs font-bold {% if p.stock_qty <= 0 %}bg-rose-100 text-rose-700{% elif p.stock_qty <= p.min_alert_qty %}bg-amber-100 text-amber-700{% else %}bg-emerald-100 text-emerald-700{% endif %}">
+                            {{ p.stock_qty }} {{ p.unit }}
+                        </span>
+                        <p class="text-[10px] text-slate-400 mt-0.5">In Stock</p>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+
+    </div>
+
+    <!-- Right Side: Billing Cart & Checkout (5 Cols) -->
+    <div class="lg:col-span-5">
+        <div class="bg-white rounded-2xl border-2 border-slate-200/90 shadow-md flex flex-col sticky top-20 overflow-hidden">
+            
+            <!-- Cart Header -->
+            <div class="p-4 bg-slate-900 text-white flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                    <i data-lucide="receipt" class="w-5 h-5 text-emerald-400"></i>
+                    <div>
+                        <h3 class="font-bold text-base leading-tight">Current Invoice</h3>
+                        <p id="modeBadge" class="text-xs text-emerald-400 font-semibold">RETAIL SALE</p>
+                    </div>
+                </div>
+                <button type="button" onclick="clearCart()" class="text-xs text-slate-400 hover:text-rose-400 transition flex items-center gap-1">
+                    <i data-lucide="trash-2" class="w-3.5 h-3.5"></i> Clear
+                </button>
+            </div>
+
+            <!-- Customer / Party Info -->
+            <div class="p-4 bg-slate-50 border-b border-slate-200 space-y-3">
+                <div id="wholesalePartySelectRow" class="hidden">
+                    <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">Select Wholesale Buyer (Party)</label>
+                    <select id="partySelect" onchange="handlePartyChange(this)" class="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs focus:ring-1 focus:ring-sky-500">
+                        <option value="">-- Select Registered Buyer or Type Below --</option>
+                        {% for party in parties %}
+                        <option value="{{ party.id }}" data-balance="{{ party.current_balance }}" data-phone="{{ party.phone }}">
+                            {{ party.name }} (Udhar: {{ settings.currency_symbol }}{{ party.current_balance }})
+                        </option>
+                        {% endfor %}
+                    </select>
+                    <div id="partyBalanceNotice" class="hidden mt-1.5 text-xs text-amber-700 bg-amber-50 p-2 rounded-lg border border-amber-200 font-medium"></div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-2">
+                    <div>
+                        <label class="block text-[11px] font-semibold text-slate-600 mb-0.5">Customer Name</label>
+                        <input type="text" id="custName" value="Walk-in Customer" placeholder="Name" class="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs">
+                    </div>
+                    <div>
+                        <label class="block text-[11px] font-semibold text-slate-600 mb-0.5">Mobile Number</label>
+                        <input type="text" id="custPhone" placeholder="Mobile / WhatsApp" class="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Cart Items List -->
+            <div id="cartItemsContainer" class="p-4 space-y-2.5 max-h-[280px] overflow-y-auto divide-y divide-slate-100 flex-1">
+                <div id="emptyCartMessage" class="text-center py-10 text-slate-400">
+                    <i data-lucide="shopping-bag" class="w-10 h-10 mx-auto mb-2 opacity-30"></i>
+                    <p class="text-sm font-medium">No items added to bill yet.</p>
+                    <p class="text-xs">Click on any bag or shoe card on the left to add.</p>
+                </div>
+            </div>
+
+            <!-- Cart Calculations & Checkout Footer -->
+            <div class="p-4 bg-slate-50 border-t border-slate-200 space-y-3">
+                <div class="space-y-1.5 text-xs text-slate-600">
+                    <div class="flex justify-between items-center">
+                        <span>Items Subtotal:</span>
+                        <span id="txtSubtotal" class="font-bold text-slate-800 text-sm">{{ settings.currency_symbol }}0.00</span>
+                    </div>
+                    <div class="flex justify-between items-center">
+                        <span class="flex items-center gap-1">
+                            Discount ({{ settings.currency_symbol }}):
+                        </span>
+                        <input type="number" id="inputDiscount" value="0" min="0" oninput="calculateTotals()"
+                               class="w-20 px-2 py-1 text-right bg-white border border-slate-300 rounded text-xs font-semibold">
+                    </div>
+                    <div class="flex justify-between items-center pt-2 border-t border-slate-200 text-base font-black text-slate-900">
+                        <span>Grand Total:</span>
+                        <span id="txtGrandTotal" class="text-emerald-700 text-lg">{{ settings.currency_symbol }}0.00</span>
+                    </div>
+                </div>
+
+                <!-- Payment Details -->
+                <div class="pt-2 border-t border-slate-200 space-y-2">
+                    <div class="grid grid-cols-2 gap-2 text-xs">
+                        <div>
+                            <label class="block font-semibold text-slate-700 mb-1">Payment Mode</label>
+                            <select id="paymentMode" class="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg font-medium">
+                                <option value="CASH">💵 Cash</option>
+                                <option value="UPI">📱 UPI / QR Code</option>
+                                <option value="CARD">💳 Debit/Credit Card</option>
+                                <option value="CREDIT">📝 Credit / Khata (Pay Later)</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block font-semibold text-slate-700 mb-1">Amount Paid ({{ settings.currency_symbol }})</label>
+                            <input type="number" id="inputPaidAmount" min="0" placeholder="0.00" class="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg font-bold text-slate-800">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Complete Sale Button -->
+                <button type="button" id="btnSubmitSale" onclick="processSale()"
+                        class="w-full py-3.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-sm tracking-wide shadow-lg shadow-emerald-600/30 flex items-center justify-center gap-2 transition disabled:opacity-50">
+                    <i data-lucide="check-circle" class="w-5 h-5"></i>
+                    COMPLETE SALE & PRINT BILL
+                </button>
+            </div>
+
+        </div>
+    </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let currentMode = 'RETAIL'; // 'RETAIL' or 'WHOLESALE'
+    let cart = []; // Array of { id, name, sku, size, color, unit, price, cost_price, quantity, max_stock }
+    const CURRENCY = "{{ settings.currency_symbol }}";
+
+    function setBillingMode(mode) {
+        currentMode = mode;
+        const btnRetail = document.getElementById('btnModeRetail');
+        const btnWholesale = document.getElementById('btnModeWholesale');
+        const modeBadge = document.getElementById('modeBadge');
+        const wsPartyRow = document.getElementById('wholesalePartySelectRow');
+
+        if (mode === 'RETAIL') {
+            btnRetail.className = "px-4 py-2 rounded-lg transition bg-white text-emerald-700 shadow-xs flex items-center gap-1.5 font-bold";
+            btnWholesale.className = "px-4 py-2 rounded-lg transition text-slate-600 hover:text-slate-900 flex items-center gap-1.5 font-semibold";
+            modeBadge.innerText = "RETAIL SALE";
+            modeBadge.className = "text-xs text-emerald-400 font-semibold";
+            wsPartyRow.classList.add('hidden');
+            if (document.getElementById('custName').value === '') {
+                document.getElementById('custName').value = 'Walk-in Customer';
+            }
+        } else {
+            btnWholesale.className = "px-4 py-2 rounded-lg transition bg-white text-indigo-700 shadow-xs flex items-center gap-1.5 font-bold";
+            btnRetail.className = "px-4 py-2 rounded-lg transition text-slate-600 hover:text-slate-900 flex items-center gap-1.5 font-semibold";
+            modeBadge.innerText = "WHOLESALE SALE (BULK)";
+            modeBadge.className = "text-xs text-indigo-400 font-semibold";
+            wsPartyRow.classList.remove('hidden');
+            if (document.getElementById('custName').value === 'Walk-in Customer') {
+                document.getElementById('custName').value = '';
+            }
+        }
+
+        // Re-price items in cart to match mode if needed
+        cart.forEach(item => {
+            const card = document.querySelector(`.product-card[data-id="${item.id}"]`);
+            if (card) {
+                item.price = currentMode === 'WHOLESALE' ? parseFloat(card.dataset.wholesale) : parseFloat(card.dataset.retail);
+            }
+        });
+
+        renderCart();
+    }
+
+    function handlePartyChange(select) {
+        const option = select.options[select.selectedIndex];
+        const notice = document.getElementById('partyBalanceNotice');
+        if (select.value) {
+            const balance = parseFloat(option.dataset.balance || 0);
+            const phone = option.dataset.phone || '';
+            document.getElementById('custName').value = option.text.split('(')[0].trim();
+            document.getElementById('custPhone').value = phone;
+
+            if (balance > 0) {
+                notice.innerHTML = `⚠️ <b>Existing Credit Balance:</b> This buyer owes <b>${CURRENCY}${balance.toFixed(2)}</b> from previous purchases.`;
+                notice.classList.remove('hidden');
+            } else {
+                notice.classList.add('hidden');
+            }
+        } else {
+            notice.classList.add('hidden');
+        }
+    }
+
+    function filterCatalog(category) {
+        document.querySelectorAll('.cat-pill').forEach(btn => {
+            btn.classList.remove('active', 'bg-slate-800', 'text-white');
+            btn.classList.add('bg-slate-100', 'text-slate-700');
+        });
+        event.target.classList.add('active', 'bg-slate-800', 'text-white');
+        event.target.classList.remove('bg-slate-100', 'text-slate-700');
+
+        const cards = document.querySelectorAll('.product-card');
+        cards.forEach(card => {
+            if (!category || card.dataset.category.toLowerCase() === category.toLowerCase()) {
+                card.classList.remove('hidden');
+            } else {
+                card.classList.add('hidden');
+            }
+        });
+    }
+
+    function handleSearch() {
+        const query = document.getElementById('posSearch').value.toLowerCase().trim();
+        const cards = document.querySelectorAll('.product-card');
+        cards.forEach(card => {
+            const name = card.dataset.name.toLowerCase();
+            const sku = card.dataset.sku.toLowerCase();
+            const size = card.dataset.size.toLowerCase();
+            const color = card.dataset.color.toLowerCase();
+            if (name.includes(query) || sku.includes(query) || size.includes(query) || color.includes(query)) {
+                card.classList.remove('hidden');
+            } else {
+                card.classList.add('hidden');
+            }
+        });
+    }
+
+    function addToCartFromCard(card) {
+        const id = parseInt(card.dataset.id);
+        const name = card.dataset.name;
+        const sku = card.dataset.sku;
+        const size = card.dataset.size;
+        const color = card.dataset.color;
+        const unit = card.dataset.unit;
+        const cost_price = parseFloat(card.dataset.cost);
+        const price = currentMode === 'WHOLESALE' ? parseFloat(card.dataset.wholesale) : parseFloat(card.dataset.retail);
+        const stock = parseInt(card.dataset.stock);
+
+        const existing = cart.find(i => i.id === id);
+        if (existing) {
+            if (existing.quantity >= stock) {
+                alert(`Warning: Only ${stock} units available in stock for this item!`);
+            }
+            existing.quantity += 1;
+        } else {
+            if (stock <= 0) {
+                if (!confirm(`This item is currently OUT OF STOCK (${stock} available). Do you still wish to bill it?`)) {
+                    return;
+                }
+            }
+            cart.push({
+                id, name, sku, size, color, unit, price, cost_price, quantity: 1, max_stock: stock
+            });
+        }
+
+        renderCart();
+    }
+
+    function updateItemQty(index, delta) {
+        cart[index].quantity += delta;
+        if (cart[index].quantity <= 0) {
+            cart.splice(index, 1);
+        }
+        renderCart();
+    }
+
+    function updateItemPrice(index, val) {
+        const newPrice = parseFloat(val) || 0;
+        cart[index].price = newPrice;
+        calculateTotals();
+    }
+
+    function removeItem(index) {
+        cart.splice(index, 1);
+        renderCart();
+    }
+
+    function clearCart() {
+        if (cart.length === 0) return;
+        if (confirm('Clear all items from this bill?')) {
+            cart = [];
+            renderCart();
+        }
+    }
+
+    function renderCart() {
+        const container = document.getElementById('cartItemsContainer');
+        if (cart.length === 0) {
+            container.innerHTML = `
+                <div id="emptyCartMessage" class="text-center py-10 text-slate-400">
+                    <i data-lucide="shopping-bag" class="w-10 h-10 mx-auto mb-2 opacity-30"></i>
+                    <p class="text-sm font-medium">No items added to bill yet.</p>
+                    <p class="text-xs">Click on any bag or shoe card on the left to add.</p>
+                </div>
+            `;
+            lucide.createIcons();
+            calculateTotals();
+            return;
+        }
+
+        let html = '';
+        cart.forEach((item, idx) => {
+            const lineTotal = item.quantity * item.price;
+            html += `
+                <div class="pt-2 first:pt-0">
+                    <div class="flex justify-between items-start">
+                        <div class="flex-1 pr-2">
+                            <h4 class="font-bold text-xs text-slate-800 leading-tight">${item.name}</h4>
+                            <div class="text-[11px] text-slate-500 mt-0.5 flex flex-wrap gap-1 items-center">
+                                ${item.size ? `<span class="bg-slate-200 px-1 rounded font-semibold text-slate-700">Sz: ${item.size}</span>` : ''}
+                                ${item.color ? `<span class="bg-slate-200 px-1 rounded font-semibold text-slate-700">${item.color}</span>` : ''}
+                                <span class="text-slate-400 font-mono text-[10px]">${item.sku}</span>
+                            </div>
+                        </div>
+                        <button onclick="removeItem(${idx})" class="text-slate-300 hover:text-rose-500 p-1">
+                            <i data-lucide="x" class="w-3.5 h-3.5"></i>
+                        </button>
+                    </div>
+
+                    <div class="mt-2 flex items-center justify-between text-xs">
+                        <div class="flex items-center border border-slate-300 rounded-lg overflow-hidden bg-white">
+                            <button onclick="updateItemQty(${idx}, -1)" class="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold">-</button>
+                            <input type="number" value="${item.quantity}" min="1" onchange="cart[${idx}].quantity = parseInt(this.value) || 1; renderCart();"
+                                   class="w-10 text-center font-bold border-none outline-none py-1 text-xs">
+                            <button onclick="updateItemQty(${idx}, 1)" class="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold">+</button>
+                        </div>
+
+                        <div class="flex items-center gap-1">
+                            <span class="text-slate-400 text-[10px]">@</span>
+                            <input type="number" value="${item.price}" onchange="updateItemPrice(${idx}, this.value)"
+                                   class="w-16 px-1.5 py-0.5 border border-slate-300 rounded text-right font-semibold text-xs" title="Edit Unit Price">
+                        </div>
+
+                        <div class="font-black text-slate-800 text-sm">
+                            ${CURRENCY}${lineTotal.toFixed(2)}
+                        </div>
+                    </div>
+                </div>
+            `;
+        });
+
+        container.innerHTML = html;
+        lucide.createIcons();
+        calculateTotals();
+    }
+
+    function calculateTotals() {
+        let subtotal = 0;
+        cart.forEach(item => {
+            subtotal += item.quantity * item.price;
+        });
+
+        const discount = parseFloat(document.getElementById('inputDiscount').value) || 0;
+        const grandTotal = Math.max(0, subtotal - discount);
+
+        document.getElementById('txtSubtotal').innerText = `${CURRENCY}${subtotal.toFixed(2)}`;
+        document.getElementById('txtGrandTotal').innerText = `${CURRENCY}${grandTotal.toFixed(2)}`;
+
+        // Default paid amount to grand total if not manually edited or payment mode is not CREDIT
+        const paymentMode = document.getElementById('paymentMode').value;
+        const inputPaid = document.getElementById('inputPaidAmount');
+        if (paymentMode === 'CREDIT') {
+            inputPaid.value = 0;
+        } else if (!inputPaid.dataset.touched) {
+            inputPaid.value = grandTotal.toFixed(2);
+        }
+    }
+
+    document.getElementById('paymentMode').addEventListener('change', function() {
+        const inputPaid = document.getElementById('inputPaidAmount');
+        if (this.value === 'CREDIT') {
+            inputPaid.value = 0;
+        } else {
+            const grandTotalStr = document.getElementById('txtGrandTotal').innerText.replace(CURRENCY, '');
+            inputPaid.value = parseFloat(grandTotalStr).toFixed(2);
+        }
+    });
+
+    document.getElementById('inputPaidAmount').addEventListener('input', function() {
+        this.dataset.touched = "true";
+    });
+
+    async function processSale() {
+        if (cart.length === 0) {
+            alert('Please add at least one bag or shoe item to the bill first!');
+            return;
+        }
+
+        const customerName = document.getElementById('custName').value.trim() || 'Walk-in Customer';
+        const customerPhone = document.getElementById('custPhone').value.trim();
+        const partyId = document.getElementById('partySelect').value || null;
+        const paymentMode = document.getElementById('paymentMode').value;
+        const discount = parseFloat(document.getElementById('inputDiscount').value) || 0;
+
+        let subtotal = 0;
+        cart.forEach(i => subtotal += i.quantity * i.price);
+        const grandTotal = Math.max(0, subtotal - discount);
+        const paidAmount = parseFloat(document.getElementById('inputPaidAmount').value) || 0;
+
+        const btnSubmit = document.getElementById('btnSubmitSale');
+        btnSubmit.disabled = true;
+        btnSubmit.innerHTML = `<i data-lucide="loader-2" class="w-5 h-5 animate-spin"></i> Processing Sale...`;
+        lucide.createIcons();
+
+        try {
+            const res = await fetch('/api/sales/create', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    sale_type: currentMode,
+                    customer_name: customerName,
+                    customer_phone: customerPhone,
+                    party_id: partyId,
+                    subtotal: subtotal,
+                    discount: discount,
+                    grand_total: grandTotal,
+                    payment_mode: paymentMode,
+                    paid_amount: paidAmount,
+                    items: cart
+                })
+            });
+
+            const data = await res.json();
+            if (data.success) {
+                // Open invoice print window immediately
+                window.open(`/invoice/${data.sale_id}`, '_blank');
+                
+                // Clear cart & reset form
+                cart = [];
+                renderCart();
+                document.getElementById('custName').value = currentMode === 'RETAIL' ? 'Walk-in Customer' : '';
+                document.getElementById('custPhone').value = '';
+                document.getElementById('inputDiscount').value = 0;
+                document.getElementById('inputPaidAmount').value = '';
+                delete document.getElementById('inputPaidAmount').dataset.touched;
+
+                alert(`Sale recorded successfully! Invoice #${data.invoice_no}`);
+                window.location.reload(); // Refresh to update live stock counters
+            } else {
+                alert(`Error saving sale: ${data.message}`);
+                btnSubmit.disabled = false;
+                btnSubmit.innerHTML = `<i data-lucide="check-circle" class="w-5 h-5"></i> COMPLETE SALE & PRINT BILL`;
+                lucide.createIcons();
+            }
+        } catch (err) {
+            alert(`Network or Server error: ${err.message}`);
+            btnSubmit.disabled = false;
+            btnSubmit.innerHTML = `<i data-lucide="check-circle" class="w-5 h-5"></i> COMPLETE SALE & PRINT BILL`;
+            lucide.createIcons();
+        }
+    }
+</script>
+{% endblock %}

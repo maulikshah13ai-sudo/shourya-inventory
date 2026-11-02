@@ -1,0 +1,185 @@
+{% extends 'base.html' %}
+
+{% block title %}Wholesale Customer Khata (Credit Ledger){% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+
+    <!-- Header & Stats -->
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+        <div>
+            <h1 class="text-2xl font-bold text-slate-800 tracking-tight">Wholesale Credit Ledger (Khata)</h1>
+            <p class="text-sm text-slate-500">Track pending payments and outstanding balances from your wholesale buyers</p>
+        </div>
+        <div class="flex items-center gap-3">
+            <div class="bg-amber-50 border border-amber-200 px-4 py-2 rounded-xl text-right">
+                <span class="text-[11px] font-bold text-amber-800 uppercase tracking-wider block">Total Outstanding Balance</span>
+                <span class="text-xl font-black text-amber-700">{{ settings.currency_symbol }}{{ "{:,.2f}".format(total_due) }}</span>
+            </div>
+            <button onclick="openAddPartyModal()" class="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-semibold text-sm shadow-sm transition">
+                <i data-lucide="user-plus" class="w-4 h-4"></i> Add Wholesale Buyer
+            </button>
+        </div>
+    </div>
+
+    <!-- Parties Grid / Table -->
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {% for p in parties %}
+        <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between hover:border-slate-300 transition">
+            <div>
+                <div class="flex items-start justify-between">
+                    <div>
+                        <h3 class="font-bold text-slate-800 text-base">{{ p.name }}</h3>
+                        <p class="text-xs text-slate-500 mt-0.5 flex items-center gap-1">
+                            <i data-lucide="phone" class="w-3 h-3"></i> {{ p.phone or 'No phone number' }}
+                        </p>
+                    </div>
+                    <span class="px-2 py-0.5 text-[10px] font-bold rounded bg-indigo-50 text-indigo-700">
+                        WHOLESALE
+                    </span>
+                </div>
+
+                {% if p.address or p.gst_no %}
+                <div class="mt-3 pt-2.5 border-t border-slate-100 text-xs text-slate-400 space-y-0.5">
+                    {% if p.address %}<div>📍 {{ p.address }}</div>{% endif %}
+                    {% if p.gst_no %}<div>🏛️ GST: {{ p.gst_no }}</div>{% endif %}
+                </div>
+                {% endif %}
+            </div>
+
+            <div class="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between">
+                <div>
+                    <span class="text-[11px] font-bold uppercase tracking-wider text-slate-400 block">Pending Balance</span>
+                    <span class="text-lg font-black {% if p.current_balance > 0 %}text-amber-600{% else %}text-emerald-600{% endif %}">
+                        {{ settings.currency_symbol }}{{ "{:,.2f}".format(p.current_balance) }}
+                    </span>
+                </div>
+                <div>
+                    <button onclick="openPaymentModal({{ p.id }}, '{{ p.name }}', {{ p.current_balance }})"
+                            class="px-3 py-1.5 rounded-xl bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 text-xs font-bold transition flex items-center gap-1">
+                        <i data-lucide="wallet" class="w-3.5 h-3.5"></i> Receive Money
+                    </button>
+                </div>
+            </div>
+        </div>
+        {% else %}
+        <div class="col-span-3 text-center py-12 bg-white rounded-2xl border border-slate-200 text-slate-400">
+            <i data-lucide="users" class="w-12 h-12 mx-auto mb-2 opacity-40"></i>
+            <p class="font-medium">No wholesale buyers registered yet.</p>
+            <p class="text-xs mt-1">Add your frequent bulk clients above to track pending payments and credit.</p>
+        </div>
+        {% endfor %}
+    </div>
+
+</div>
+
+<!-- Modal: Receive Payment -->
+<div id="modalPayment" class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 hidden">
+    <div class="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl border border-slate-200">
+        <h3 class="font-bold text-base text-slate-900 mb-1">Record Payment Received</h3>
+        <p id="payPartyName" class="text-xs text-slate-500 mb-4 font-semibold"></p>
+
+        <form action="{{ url_for('record_party_payment') }}" method="POST" class="space-y-4">
+            <input type="hidden" name="party_id" id="payPartyId">
+
+            <div class="bg-amber-50 p-3 rounded-xl border border-amber-200 flex justify-between items-center text-xs">
+                <span class="text-amber-800">Total Pending Now:</span>
+                <span id="payCurrentBal" class="font-black text-amber-700 text-sm"></span>
+            </div>
+
+            <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1">Amount Received ({{ settings.currency_symbol }}) *</label>
+                <input type="number" step="0.01" name="amount" id="inpPayAmount" required class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-lg font-black text-slate-900 focus:bg-white text-center">
+            </div>
+
+            <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1">Payment Mode</label>
+                <select name="payment_mode" class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-medium">
+                    <option value="CASH">💵 Cash</option>
+                    <option value="UPI">📱 UPI / QR Code</option>
+                    <option value="BANK_TRANSFER">🏦 Bank Transfer (NEFT/IMPS)</option>
+                    <option value="CHEQUE">📑 Cheque</option>
+                </select>
+            </div>
+
+            <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1">Reference / Note</label>
+                <input type="text" name="notes" placeholder="e.g. GPay Ref 40292 or Cheque #981" class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs">
+            </div>
+
+            <div class="flex gap-2 pt-2">
+                <button type="button" onclick="closePaymentModal()" class="flex-1 py-2 rounded-xl bg-slate-100 text-slate-700 text-xs font-semibold">Cancel</button>
+                <button type="submit" class="flex-1 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold">Save Receipt</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Modal: Add New Wholesale Buyer -->
+<div id="modalAddParty" class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 hidden">
+    <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200">
+        <h3 class="font-bold text-base text-slate-900 mb-4 flex items-center gap-2">
+            <i data-lucide="user-plus" class="w-5 h-5 text-sky-500"></i> Add Wholesale Buyer
+        </h3>
+
+        <form action="{{ url_for('add_party') }}" method="POST" class="space-y-3">
+            <input type="hidden" name="party_type" value="WHOLESALE_BUYER">
+
+            <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1">Buyer / Shop / Firm Name *</label>
+                <input type="text" name="name" required placeholder="e.g. Royal Footwear & Bags" class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs">
+            </div>
+
+            <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1">Contact Phone / WhatsApp</label>
+                <input type="text" name="phone" placeholder="+91 98..." class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs">
+            </div>
+
+            <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1">Shop Address</label>
+                <input type="text" name="address" placeholder="Market, City" class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs">
+            </div>
+
+            <div class="grid grid-cols-2 gap-3">
+                <div>
+                    <label class="block text-xs font-bold text-slate-700 mb-1">GSTIN (Optional)</label>
+                    <input type="text" name="gst_no" placeholder="27..." class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-slate-700 mb-1">Opening Balance ({{ settings.currency_symbol }})</label>
+                    <input type="number" step="0.01" name="opening_balance" value="0.00" class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold">
+                </div>
+            </div>
+
+            <div class="flex gap-2 pt-3 border-t border-slate-200">
+                <button type="button" onclick="closeAddPartyModal()" class="flex-1 py-2 rounded-xl bg-slate-100 text-slate-700 text-xs font-semibold">Cancel</button>
+                <button type="submit" class="flex-1 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold">Save Buyer</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const CURRENCY = "{{ settings.currency_symbol }}";
+
+    function openPaymentModal(id, name, balance) {
+        document.getElementById('payPartyId').value = id;
+        document.getElementById('payPartyName').innerText = name;
+        document.getElementById('payCurrentBal').innerText = `${CURRENCY}${balance.toFixed(2)}`;
+        document.getElementById('inpPayAmount').value = balance.toFixed(2);
+        document.getElementById('modalPayment').classList.remove('hidden');
+    }
+    function closePaymentModal() {
+        document.getElementById('modalPayment').classList.add('hidden');
+    }
+
+    function openAddPartyModal() {
+        document.getElementById('modalAddParty').classList.remove('hidden');
+    }
+    function closeAddPartyModal() {
+        document.getElementById('modalAddParty').classList.add('hidden');
+    }
+</script>
+{% endblock %}

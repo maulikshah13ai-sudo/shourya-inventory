@@ -1,0 +1,288 @@
+{% extends 'base.html' %}
+
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+
+    <!-- Multi-Device Wi-Fi Connection Banner -->
+    <div class="bg-gradient-to-r from-slate-900 to-indigo-900 text-white p-4 rounded-2xl shadow-sm flex flex-col sm:flex-row items-center justify-between gap-4">
+        <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-xl bg-sky-500/20 text-sky-400 flex items-center justify-center shrink-0">
+                <i data-lucide="wifi" class="w-5 h-5"></i>
+            </div>
+            <div>
+                <h4 class="font-bold text-sm text-white">Multi-User Shop Network Active</h4>
+                <p class="text-xs text-slate-300">Salesmen, godown, and accounting staff can open the app on their phones/laptops:</p>
+            </div>
+        </div>
+        <div class="flex items-center gap-2">
+            <span class="text-xs text-slate-400">Shop Wi-Fi URL:</span>
+            <span class="px-3 py-1.5 rounded-lg bg-black/40 text-emerald-400 font-mono font-bold text-sm border border-emerald-500/30">
+                http://{{ local_ip }}:5000
+            </span>
+        </div>
+    </div>
+
+    <!-- Top Action Bar -->
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm">
+        <div>
+            <h1 class="text-2xl font-bold text-slate-800 tracking-tight">Shop Overview & Stock Status</h1>
+            <p class="text-sm text-slate-500">Welcome to your daily store management console</p>
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+            <a href="{{ url_for('pos') }}" class="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-sm shadow-md shadow-emerald-600/20 transition">
+                <i data-lucide="plus-circle" class="w-4 h-4"></i>
+                New Sale / Bill (POS)
+            </a>
+            <a href="{{ url_for('purchases') }}" class="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-medium text-sm shadow-sm transition">
+                <i data-lucide="arrow-down-circle" class="w-4 h-4"></i>
+                Stock In (Bulk Purchase)
+            </a>
+            <a href="{{ url_for('inventory') }}" class="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium text-sm transition">
+                <i data-lucide="package-plus" class="w-4 h-4"></i>
+                Add Product
+            </a>
+        </div>
+    </div>
+
+    <!-- Key Metrics 4-Grid -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <!-- Stock Quantity -->
+        <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-start justify-between">
+            <div>
+                <p class="text-xs font-semibold uppercase tracking-wider text-slate-500">Physical Stock</p>
+                <h3 class="text-2xl font-black text-slate-800 mt-1">{{ total_stock_items }} <span class="text-xs font-normal text-slate-400">units/pairs</span></h3>
+                <p class="text-xs text-slate-500 mt-1">{{ total_products }} active product SKUs</p>
+            </div>
+            <div class="w-12 h-12 rounded-xl bg-sky-50 text-sky-600 flex items-center justify-center">
+                <i data-lucide="boxes" class="w-6 h-6"></i>
+            </div>
+        </div>
+
+        <!-- Inventory Value (Cost) -->
+        <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-start justify-between">
+            <div>
+                <p class="text-xs font-semibold uppercase tracking-wider text-slate-500">Stock Investment (Cost)</p>
+                <h3 class="text-2xl font-black text-slate-800 mt-1">{{ settings.currency_symbol }}{{ "{:,.2f}".format(stock_cost_val) }}</h3>
+                <p class="text-xs text-slate-500 mt-1">Wholesale Value: {{ settings.currency_symbol }}{{ "{:,.0f}".format(stock_ws_val) }}</p>
+            </div>
+            <div class="w-12 h-12 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
+                <i data-lucide="banknote" class="w-6 h-6"></i>
+            </div>
+        </div>
+
+        <!-- Today's Sales -->
+        <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-start justify-between">
+            <div>
+                <p class="text-xs font-semibold uppercase tracking-wider text-slate-500">Today's Sales</p>
+                <h3 class="text-2xl font-black text-emerald-600 mt-1">{{ settings.currency_symbol }}{{ "{:,.2f}".format(today_sales_total) }}</h3>
+                <p class="text-xs text-slate-500 mt-1">
+                    {{ today_orders_count }} bills (WS: {{ settings.currency_symbol }}{{ "{:,.0f}".format(today_wholesale_total) }} | Ret: {{ settings.currency_symbol }}{{ "{:,.0f}".format(today_retail_total) }})
+                </p>
+            </div>
+            <div class="w-12 h-12 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+                <i data-lucide="trending-up" class="w-6 h-6"></i>
+            </div>
+        </div>
+
+        <!-- Wholesale Credit / Outstanding Khata -->
+        <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-start justify-between">
+            <div>
+                <p class="text-xs font-semibold uppercase tracking-wider text-slate-500">Wholesale Udhar (Receivable)</p>
+                <h3 class="text-2xl font-black text-amber-600 mt-1">{{ settings.currency_symbol }}{{ "{:,.2f}".format(total_receivable) }}</h3>
+                <a href="{{ url_for('ledger') }}" class="text-xs font-medium text-sky-600 hover:underline mt-1 inline-block">
+                    View Party Balances &rarr;
+                </a>
+            </div>
+            <div class="w-12 h-12 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center">
+                <i data-lucide="book-open" class="w-6 h-6"></i>
+            </div>
+        </div>
+    </div>
+
+    <!-- Low Stock Alert Banner (Critical for Bags & Shoes) -->
+    {% if low_stock_items %}
+    <div class="bg-rose-50 border-2 border-rose-200 rounded-2xl p-5 shadow-sm">
+        <div class="flex items-center justify-between mb-3">
+            <div class="flex items-center gap-2">
+                <div class="w-8 h-8 rounded-lg bg-rose-600 text-white flex items-center justify-center">
+                    <i data-lucide="alert-triangle" class="w-5 h-5"></i>
+                </div>
+                <div>
+                    <h3 class="text-base font-bold text-rose-900">Low Stock Alert ({{ low_stock_items|length }} Items Need Restocking)</h3>
+                    <p class="text-xs text-rose-700">These items have reached or dropped below their minimum stock threshold.</p>
+                </div>
+            </div>
+            <a href="{{ url_for('inventory', status='low') }}" class="text-xs font-semibold text-rose-700 hover:text-rose-900 bg-white px-3 py-1.5 rounded-lg border border-rose-200">
+                View All Low Stock &rarr;
+            </a>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+            {% for item in low_stock_items[:6] %}
+            <div class="bg-white p-3.5 rounded-xl border border-rose-200 flex items-center justify-between shadow-xs">
+                <div>
+                    <span class="text-xs font-bold uppercase px-2 py-0.5 rounded-md {% if item.category == 'Shoes' %}bg-amber-100 text-amber-800{% else %}bg-purple-100 text-purple-800{% endif %}">
+                        {{ item.category }}
+                    </span>
+                    <h4 class="font-bold text-slate-800 text-sm mt-1 truncate max-w-[200px]" title="{{ item.name }}">{{ item.name }}</h4>
+                    <p class="text-xs text-slate-500">Size: <span class="font-semibold text-slate-700">{{ item.size or 'N/A' }}</span> | Color: <span class="font-semibold text-slate-700">{{ item.color or 'N/A' }}</span></p>
+                </div>
+                <div class="text-right">
+                    <span class="inline-block px-2.5 py-1 rounded-full text-xs font-black {% if item.stock_qty <= 0 %}bg-rose-600 text-white{% else %}bg-rose-100 text-rose-700{% endif %}">
+                        {{ item.stock_qty }} {{ item.unit }}
+                    </span>
+                    <p class="text-[11px] text-slate-400 mt-1">Min: {{ item.min_alert_qty }}</p>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Two-Column Layout: Category Breakdown & Recent Sales -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+        <!-- Category Overview & Quick Links (1 Col) -->
+        <div class="space-y-6">
+            <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+                <h3 class="font-bold text-slate-800 text-base mb-4 flex items-center gap-2">
+                    <i data-lucide="pie-chart" class="w-4 h-4 text-sky-600"></i>
+                    Stock by Category
+                </h3>
+
+                <div class="space-y-3">
+                    {% for cat in category_breakdown %}
+                    <div class="p-3.5 rounded-xl bg-slate-50 border border-slate-100 flex items-center justify-between">
+                        <div class="flex items-center gap-3">
+                            <div class="w-10 h-10 rounded-xl flex items-center justify-center font-bold text-lg {% if cat.category == 'Shoes' %}bg-amber-100 text-amber-700{% else %}bg-purple-100 text-purple-700{% endif %}">
+                                {% if cat.category == 'Shoes' %}👞{% elif cat.category == 'Bags' %}🎒{% else %}📦{% endif %}
+                            </div>
+                            <div>
+                                <h4 class="font-bold text-slate-800 text-sm">{{ cat.category }}</h4>
+                                <p class="text-xs text-slate-500">{{ cat['COUNT(*)'] }} Unique Models</p>
+                            </div>
+                        </div>
+                        <div class="text-right">
+                            <span class="font-black text-slate-800 text-base">{{ cat['SUM(stock_qty)'] }}</span>
+                            <p class="text-[10px] text-slate-400 uppercase font-semibold">Total Units</p>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+
+                <div class="mt-5 pt-4 border-t border-slate-100 flex gap-2">
+                    <a href="{{ url_for('inventory', category='Bags') }}" class="flex-1 text-center py-2 px-3 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-700 text-xs font-bold transition">
+                        🎒 View Bags Stock
+                    </a>
+                    <a href="{{ url_for('inventory', category='Shoes') }}" class="flex-1 text-center py-2 px-3 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-700 text-xs font-bold transition">
+                        👞 View Shoes Stock
+                    </a>
+                </div>
+            </div>
+
+            <!-- Helpful Guide for Non-Technical Users -->
+            <div class="bg-gradient-to-br from-slate-900 to-indigo-950 text-white p-5 rounded-2xl shadow-sm">
+                <h3 class="font-bold text-sm flex items-center gap-2 text-sky-400">
+                    <i data-lucide="help-circle" class="w-4 h-4"></i>
+                    How To Run Your Shop Daily:
+                </h3>
+                <ul class="text-xs text-slate-300 space-y-2.5 mt-3">
+                    <li class="flex items-start gap-2">
+                        <span class="bg-sky-500/20 text-sky-400 font-bold rounded-full w-5 h-5 flex items-center justify-center shrink-0">1</span>
+                        <span><b>When Stock Arrives:</b> Go to <i>Stock In</i> to record bulk quantity from factories/suppliers.</span>
+                    </li>
+                    <li class="flex items-start gap-2">
+                        <span class="bg-sky-500/20 text-sky-400 font-bold rounded-full w-5 h-5 flex items-center justify-center shrink-0">2</span>
+                        <span><b>Selling to Customers:</b> Open <i>New Bill / POS</i>. Pick <b>Wholesale</b> (for bulk buyers) or <b>Retail</b> (for single walk-ins).</span>
+                    </li>
+                    <li class="flex items-start gap-2">
+                        <span class="bg-sky-500/20 text-sky-400 font-bold rounded-full w-5 h-5 flex items-center justify-center shrink-0">3</span>
+                        <span><b>Track Pending Udhar:</b> Check <i>Wholesale Khata</i> to see who owes what and record cash/UPI received.</span>
+                    </li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- Recent Sales (2 Cols) -->
+        <div class="lg:col-span-2 bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between">
+            <div>
+                <div class="flex items-center justify-between mb-4">
+                    <h3 class="font-bold text-slate-800 text-base flex items-center gap-2">
+                        <i data-lucide="clock" class="w-4 h-4 text-emerald-600"></i>
+                        Recent Billing & Sales
+                    </h3>
+                    <a href="{{ url_for('sales') }}" class="text-xs font-semibold text-sky-600 hover:underline">
+                        View All Sales History &rarr;
+                    </a>
+                </div>
+
+                {% if recent_sales %}
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left text-sm">
+                        <thead>
+                            <tr class="text-xs text-slate-400 uppercase border-b border-slate-100">
+                                <th class="pb-3 font-semibold">Invoice #</th>
+                                <th class="pb-3 font-semibold">Type</th>
+                                <th class="pb-3 font-semibold">Customer</th>
+                                <th class="pb-3 font-semibold">Amount</th>
+                                <th class="pb-3 font-semibold">Status</th>
+                                <th class="pb-3 font-semibold text-right">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-100">
+                            {% for sale in recent_sales %}
+                            <tr class="hover:bg-slate-50 transition">
+                                <td class="py-3 font-bold text-slate-800">{{ sale.invoice_no }}</td>
+                                <td class="py-3">
+                                    <span class="px-2 py-0.5 text-[11px] font-bold rounded-md {% if sale.sale_type == 'WHOLESALE' %}bg-indigo-100 text-indigo-800{% else %}bg-emerald-100 text-emerald-800{% endif %}">
+                                        {{ sale.sale_type }}
+                                    </span>
+                                </td>
+                                <td class="py-3 text-slate-700">
+                                    <div class="font-medium">{{ sale.customer_name }}</div>
+                                    <div class="text-[11px] text-slate-400">{{ sale.created_at[:16] }}</div>
+                                </td>
+                                <td class="py-3 font-bold text-slate-800">
+                                    {{ settings.currency_symbol }}{{ "{:,.2f}".format(sale.grand_total) }}
+                                </td>
+                                <td class="py-3">
+                                    <span class="px-2 py-0.5 text-[11px] font-semibold rounded-md 
+                                        {% if sale.payment_status == 'PAID' %}bg-emerald-50 text-emerald-700 border border-emerald-200
+                                        {% elif sale.payment_status == 'PARTIAL' %}bg-amber-50 text-amber-700 border border-amber-200
+                                        {% else %}bg-rose-50 text-rose-700 border border-rose-200{% endif %}">
+                                        {{ sale.payment_status }}
+                                    </span>
+                                </td>
+                                <td class="py-3 text-right">
+                                    <a href="{{ url_for('print_invoice', sale_id=sale.id) }}" target="_blank" class="p-1.5 rounded-lg text-slate-500 hover:text-sky-600 hover:bg-sky-50 inline-block" title="Print Invoice">
+                                        <i data-lucide="printer" class="w-4 h-4"></i>
+                                    </a>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="text-center py-12 text-slate-400">
+                    <i data-lucide="shopping-bag" class="w-12 h-12 mx-auto mb-2 opacity-40"></i>
+                    <p class="font-medium">No sales recorded yet today.</p>
+                    <p class="text-xs">Click the "New Sale / Bill" button above to record your first sale!</p>
+                </div>
+                {% endif %}
+            </div>
+
+            <div class="mt-4 pt-3 border-t border-slate-100 flex justify-between items-center text-xs text-slate-500">
+                <span>Backup your data anytime from Settings</span>
+                <a href="{{ url_for('export_sales_csv') }}" class="text-sky-600 font-semibold hover:underline flex items-center gap-1">
+                    <i data-lucide="download" class="w-3.5 h-3.5"></i> Download Sales CSV
+                </a>
+            </div>
+        </div>
+
+    </div>
+
+</div>
+{% endblock %}

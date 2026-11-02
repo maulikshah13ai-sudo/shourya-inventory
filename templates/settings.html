@@ -1,0 +1,90 @@
+{% extends 'base.html' %}
+
+{% block title %}Shop Settings{% endblock %}
+
+{% block content %}
+<div class="max-w-3xl mx-auto space-y-6">
+
+    <!-- Header -->
+    <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+        <h1 class="text-2xl font-bold text-slate-800 tracking-tight">Shop Settings & Invoice Profile</h1>
+        <p class="text-sm text-slate-500">Configure your business details that appear on printed receipts and invoices</p>
+    </div>
+
+    <!-- Settings Form -->
+    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
+        <form method="POST" action="{{ url_for('settings') }}" class="space-y-4">
+            
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div class="sm:col-span-2">
+                    <label class="block text-xs font-bold text-slate-700 mb-1">Shop / Firm Name *</label>
+                    <input type="text" name="shop_name" value="{{ s.shop_name }}" required class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-sm font-bold text-slate-900 focus:bg-white">
+                </div>
+
+                <div class="sm:col-span-2">
+                    <label class="block text-xs font-bold text-slate-700 mb-1">Tagline / Sub-heading</label>
+                    <input type="text" name="tagline" value="{{ s.tagline }}" placeholder="e.g. Wholesale & Retail Footwear & Bags" class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs focus:bg-white">
+                </div>
+
+                <div>
+                    <label class="block text-xs font-bold text-slate-700 mb-1">Primary Phone Number</label>
+                    <input type="text" name="phone" value="{{ s.phone }}" placeholder="+91 98765 43210" class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs focus:bg-white">
+                </div>
+
+                <div>
+                    <label class="block text-xs font-bold text-slate-700 mb-1">Email Address</label>
+                    <input type="email" name="email" value="{{ s.email }}" placeholder="store@example.com" class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs focus:bg-white">
+                </div>
+
+                <div class="sm:col-span-2">
+                    <label class="block text-xs font-bold text-slate-700 mb-1">Shop Address</label>
+                    <input type="text" name="address" value="{{ s.address }}" placeholder="Shop #, Market Complex, City" class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs focus:bg-white">
+                </div>
+
+                <div>
+                    <label class="block text-xs font-bold text-slate-700 mb-1">Tax / GST Number (Optional)</label>
+                    <input type="text" name="tax_number" value="{{ s.tax_number }}" placeholder="GSTIN: 27AAAAA0000A1Z5" class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-mono focus:bg-white">
+                </div>
+
+                <div>
+                    <label class="block text-xs font-bold text-slate-700 mb-1">Currency Symbol</label>
+                    <input type="text" name="currency_symbol" value="{{ s.currency_symbol }}" required placeholder="₹ or $ or AED" class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-sm font-bold focus:bg-white">
+                </div>
+
+                <div class="sm:col-span-2">
+                    <label class="block text-xs font-bold text-slate-700 mb-1">Receipt Footer Note / Return Policy</label>
+                    <textarea name="invoice_footer" rows="2" class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs focus:bg-white">{{ s.invoice_footer }}</textarea>
+                </div>
+            </div>
+
+            <div class="pt-4 border-t border-slate-200 flex justify-end">
+                <button type="submit" class="px-6 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs shadow-md shadow-sky-600/20">
+                    Save Shop Profile
+                </button>
+            </div>
+        </form>
+    </div>
+
+    <!-- Data Safety & Local Backup Card -->
+    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
+        <h3 class="font-bold text-sm text-slate-900 flex items-center gap-2 mb-2">
+            <i data-lucide="shield-check" class="w-5 h-5 text-emerald-600"></i> Local Database & Data Safety
+        </h3>
+        <p class="text-xs text-slate-500 mb-4 leading-relaxed">
+            All your shop's inventory, purchases, sales, and customer khata records are saved securely inside the single file:
+            <code class="bg-slate-100 text-slate-800 px-2 py-0.5 rounded font-mono font-bold">inventory.db</code> on this computer.
+            You do not need internet access or monthly cloud subscriptions.
+        </p>
+
+        <div class="flex flex-wrap items-center gap-3">
+            <a href="{{ url_for('export_inventory_csv') }}" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold flex items-center gap-1.5 transition">
+                <i data-lucide="download" class="w-4 h-4"></i> Export Inventory to CSV / Excel
+            </a>
+            <a href="{{ url_for('export_sales_csv') }}" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold flex items-center gap-1.5 transition">
+                <i data-lucide="download" class="w-4 h-4"></i> Export Sales to CSV
+            </a>
+        </div>
+    </div>
+
+</div>
+{% endblock %}

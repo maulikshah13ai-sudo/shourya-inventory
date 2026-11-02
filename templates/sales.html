@@ -1,0 +1,132 @@
+{% extends 'base.html' %}
+
+{% block title %}Sales History & Invoices{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+
+    <!-- Header -->
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+        <div>
+            <h1 class="text-2xl font-bold text-slate-800 tracking-tight">Sales History & Invoices</h1>
+            <p class="text-sm text-slate-500">Track all customer bills, wholesale orders, and reprint receipts</p>
+        </div>
+        <div class="flex items-center gap-2">
+            <a href="{{ url_for('export_sales_csv') }}" class="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-sm transition">
+                <i data-lucide="download" class="w-4 h-4"></i> Export to Excel/CSV
+            </a>
+            <a href="{{ url_for('pos') }}" class="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-sm shadow-sm transition">
+                <i data-lucide="plus" class="w-4 h-4"></i> New Bill
+            </a>
+        </div>
+    </div>
+
+    <!-- Filters & Search Toolbar -->
+    <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+        <form method="GET" action="{{ url_for('sales') }}" class="flex flex-wrap items-center justify-between gap-3 text-xs">
+            <div class="flex flex-wrap items-center gap-2">
+                <a href="{{ url_for('sales') }}" class="px-3 py-2 rounded-lg font-semibold {% if not sale_type %}bg-slate-800 text-white{% else %}bg-slate-100 text-slate-700 hover:bg-slate-200{% endif %}">
+                    All Bills
+                </a>
+                <a href="{{ url_for('sales', sale_type='WHOLESALE') }}" class="px-3 py-2 rounded-lg font-semibold {% if sale_type == 'WHOLESALE' %}bg-indigo-700 text-white{% else %}bg-indigo-50 text-indigo-700 hover:bg-indigo-100{% endif %}">
+                    Bulk Wholesale
+                </a>
+                <a href="{{ url_for('sales', sale_type='RETAIL') }}" class="px-3 py-2 rounded-lg font-semibold {% if sale_type == 'RETAIL' %}bg-emerald-700 text-white{% else %}bg-emerald-50 text-emerald-700 hover:bg-emerald-100{% endif %}">
+                    Retail Walk-in
+                </a>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-2">
+                <div class="relative">
+                    <input type="text" name="search" value="{{ search }}" placeholder="Search customer, phone, invoice..." 
+                           class="w-56 pl-8 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:bg-white focus:outline-none focus:border-sky-500">
+                    <i data-lucide="search" class="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5"></i>
+                </div>
+
+                <div class="flex items-center gap-1">
+                    <span class="text-slate-400">From:</span>
+                    <input type="date" name="start_date" value="{{ start_date }}" class="px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs">
+                    <span class="text-slate-400">To:</span>
+                    <input type="date" name="end_date" value="{{ end_date }}" class="px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs">
+                </div>
+
+                <button type="submit" class="px-3 py-2 bg-slate-800 text-white rounded-lg font-semibold hover:bg-slate-700">
+                    Filter
+                </button>
+                {% if search or start_date or end_date or sale_type %}
+                <a href="{{ url_for('sales') }}" class="text-slate-400 hover:text-slate-600 font-medium">Reset</a>
+                {% endif %}
+            </div>
+        </form>
+    </div>
+
+    <!-- Sales Table -->
+    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div class="overflow-x-auto">
+            <table class="w-full text-left text-xs">
+                <thead class="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase font-semibold">
+                    <tr>
+                        <th class="py-3.5 px-4">Invoice #</th>
+                        <th class="py-3.5 px-4">Type</th>
+                        <th class="py-3.5 px-4">Customer Details</th>
+                        <th class="py-3.5 px-4">Date & Time</th>
+                        <th class="py-3.5 px-4">Subtotal / Disc</th>
+                        <th class="py-3.5 px-4">Grand Total</th>
+                        <th class="py-3.5 px-4">Payment</th>
+                        <th class="py-3.5 px-4">Status</th>
+                        <th class="py-3.5 px-4 text-right">Actions</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100">
+                    {% for s in sales %}
+                    <tr class="hover:bg-slate-50 transition">
+                        <td class="py-3 px-4 font-bold text-slate-900 font-mono">{{ s.invoice_no }}</td>
+                        <td class="py-3 px-4">
+                            <span class="px-2 py-0.5 rounded text-[11px] font-bold {% if s.sale_type == 'WHOLESALE' %}bg-indigo-100 text-indigo-800{% else %}bg-emerald-100 text-emerald-800{% endif %}">
+                                {{ s.sale_type }}
+                            </span>
+                        </td>
+                        <td class="py-3 px-4">
+                            <div class="font-bold text-slate-800">{{ s.customer_name }}</div>
+                            {% if s.customer_phone %}<div class="text-slate-400">{{ s.customer_phone }}</div>{% endif %}
+                        </td>
+                        <td class="py-3 px-4 text-slate-600">{{ s.created_at[:16] }}</td>
+                        <td class="py-3 px-4 text-slate-500">
+                            {{ settings.currency_symbol }}{{ "{:,.2f}".format(s.subtotal) }}
+                            {% if s.discount > 0 %}<span class="text-rose-500">(-{{ settings.currency_symbol }}{{ "{:,.2f}".format(s.discount) }})</span>{% endif %}
+                        </td>
+                        <td class="py-3 px-4 font-black text-slate-900 text-sm">
+                            {{ settings.currency_symbol }}{{ "{:,.2f}".format(s.grand_total) }}
+                        </td>
+                        <td class="py-3 px-4 font-semibold text-slate-700">
+                            {{ s.payment_mode }}
+                        </td>
+                        <td class="py-3 px-4">
+                            <span class="px-2 py-0.5 rounded-full text-[10px] font-bold 
+                                {% if s.payment_status == 'PAID' %}bg-emerald-50 text-emerald-700 border border-emerald-200
+                                {% elif s.payment_status == 'PARTIAL' %}bg-amber-50 text-amber-700 border border-amber-200
+                                {% else %}bg-rose-50 text-rose-700 border border-rose-200{% endif %}">
+                                {{ s.payment_status }}
+                            </span>
+                        </td>
+                        <td class="py-3 px-4 text-right">
+                            <a href="{{ url_for('print_invoice', sale_id=s.id) }}" target="_blank"
+                               class="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-sky-50 text-sky-700 hover:bg-sky-100 font-bold transition">
+                                <i data-lucide="printer" class="w-3.5 h-3.5"></i> Print Bill
+                            </a>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="9" class="text-center py-10 text-slate-400">
+                            No sales invoices found matching your criteria.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+</div>
+{% endblock %}

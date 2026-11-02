@@ -1,0 +1,496 @@
+{% extends 'base.html' %}
+
+{% block title %}Products & Stock Catalog{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+
+    <!-- Header & Actions -->
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+        <div>
+            <h1 class="text-2xl font-bold text-slate-800 tracking-tight">Products & Stock Inventory</h1>
+            <p class="text-sm text-slate-500">Manage all your bags and shoes variants, prices, and stock levels</p>
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+            <button onclick="openAddModal()" class="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-semibold text-sm shadow-sm transition">
+                <i data-lucide="plus" class="w-4 h-4"></i> Add New Product
+            </button>
+            <a href="{{ url_for('export_inventory_csv') }}" class="inline-flex items-center gap-2 px-3.5 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium text-sm transition">
+                <i data-lucide="download" class="w-4 h-4"></i> Export to Excel/CSV
+            </a>
+        </div>
+    </div>
+
+    <!-- Filters & Search Toolbar -->
+    <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row items-center justify-between gap-4">
+        
+        <!-- Category & Status Filters -->
+        <div class="flex flex-wrap items-center gap-2 w-full md:w-auto text-xs">
+            <a href="{{ url_for('inventory', status=status, search=search) }}" 
+               class="px-3 py-2 rounded-lg font-semibold {% if not category %}bg-slate-800 text-white{% else %}bg-slate-100 text-slate-700 hover:bg-slate-200{% endif %}">
+                All Products ({{ products|length }})
+            </a>
+            <a href="{{ url_for('inventory', category='Bags', status=status, search=search) }}" 
+               class="px-3 py-2 rounded-lg font-semibold {% if category == 'Bags' %}bg-purple-700 text-white{% else %}bg-purple-50 text-purple-700 hover:bg-purple-100{% endif %}">
+                🎒 Bags
+            </a>
+            <a href="{{ url_for('inventory', category='Shoes', status=status, search=search) }}" 
+               class="px-3 py-2 rounded-lg font-semibold {% if category == 'Shoes' %}bg-amber-700 text-white{% else %}bg-amber-50 text-amber-700 hover:bg-amber-100{% endif %}">
+                👞 Shoes
+            </a>
+            <span class="text-slate-300">|</span>
+            <a href="{{ url_for('inventory', category=category, status='low', search=search) }}" 
+               class="px-3 py-2 rounded-lg font-semibold {% if status == 'low' %}bg-rose-700 text-white{% else %}bg-rose-50 text-rose-700 hover:bg-rose-100{% endif %}">
+                ⚠️ Low Stock Alert
+            </a>
+        </div>
+
+        <!-- Search Form -->
+        <form method="GET" action="{{ url_for('inventory') }}" class="w-full md:w-72 flex items-center gap-2">
+            <input type="hidden" name="category" value="{{ category }}">
+            <input type="hidden" name="status" value="{{ status }}">
+            <div class="relative w-full">
+                <input type="text" name="search" value="{{ search }}" placeholder="Search name, SKU, size..." 
+                       class="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:bg-white focus:outline-none focus:border-sky-500">
+                <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3 top-2.5"></i>
+            </div>
+            <button type="submit" class="px-3 py-2 bg-slate-800 text-white text-xs font-semibold rounded-xl hover:bg-slate-700">
+                Go
+            </button>
+            {% if search %}
+            <a href="{{ url_for('inventory', category=category, status=status) }}" class="text-slate-400 hover:text-slate-600 text-xs font-medium">Reset</a>
+            {% endif %}
+        </form>
+
+    </div>
+
+    <!-- Products Table -->
+    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div class="overflow-x-auto">
+            <table class="w-full text-left text-sm">
+                <thead class="bg-slate-50 border-b border-slate-200 text-xs text-slate-500 uppercase">
+                    <tr>
+                        <th class="py-3 px-4">Item Details</th>
+                        <th class="py-3 px-4">Category / Type</th>
+                        <th class="py-3 px-4">Size & Color</th>
+                        <th class="py-3 px-4 text-center">In Stock</th>
+                        <th class="py-3 px-4">Cost Price</th>
+                        <th class="py-3 px-4">Wholesale Price</th>
+                        <th class="py-3 px-4">Retail Price</th>
+                        <th class="py-3 px-4 text-right">Actions</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100">
+                    {% for p in products %}
+                    <tr class="hover:bg-slate-50/80 transition">
+                        <!-- Name & SKU -->
+                        <td class="py-3.5 px-4">
+                            <div class="font-bold text-slate-900 leading-snug">{{ p.name }}</div>
+                            <div class="text-xs text-slate-400 flex items-center gap-2 mt-0.5">
+                                <span class="font-mono text-slate-500">{{ p.sku }}</span>
+                                {% if p.brand %}<span>• Brand: {{ p.brand }}</span>{% endif %}
+                                {% if p.location %}<span>• {{ p.location }}</span>{% endif %}
+                            </div>
+                        </td>
+
+                        <!-- Category -->
+                        <td class="py-3.5 px-4">
+                            <span class="px-2 py-0.5 text-xs font-bold rounded-md {% if p.category == 'Shoes' %}bg-amber-100 text-amber-800{% else %}bg-purple-100 text-purple-800{% endif %}">
+                                {{ p.category }}
+                            </span>
+                            <div class="text-xs text-slate-500 mt-1">{{ p.subcategory or 'Standard' }}</div>
+                        </td>
+
+                        <!-- Size & Color -->
+                        <td class="py-3.5 px-4 text-xs">
+                            <div><span class="text-slate-400">Size:</span> <span class="font-semibold text-slate-700">{{ p.size or '-' }}</span></div>
+                            <div class="mt-0.5"><span class="text-slate-400">Color:</span> <span class="font-semibold text-slate-700">{{ p.color or '-' }}</span></div>
+                        </td>
+
+                        <!-- Stock Level -->
+                        <td class="py-3.5 px-4 text-center">
+                            <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black 
+                                {% if p.stock_qty <= 0 %}bg-rose-100 text-rose-700 border border-rose-200
+                                {% elif p.stock_qty <= p.min_alert_qty %}bg-amber-100 text-amber-800 border border-amber-300
+                                {% else %}bg-emerald-100 text-emerald-800 border border-emerald-200{% endif %}">
+                                {% if p.stock_qty <= p.min_alert_qty %}
+                                    <i data-lucide="alert-triangle" class="w-3.5 h-3.5"></i>
+                                {% endif %}
+                                {{ p.stock_qty }} {{ p.unit }}
+                            </span>
+                            <div class="text-[10px] text-slate-400 mt-1">Min Alert: {{ p.min_alert_qty }}</div>
+                        </td>
+
+                        <!-- Prices -->
+                        <td class="py-3.5 px-4 text-xs font-medium text-slate-600">
+                            {{ settings.currency_symbol }}{{ "{:,.2f}".format(p.cost_price) }}
+                        </td>
+                        <td class="py-3.5 px-4 text-xs font-bold text-indigo-700">
+                            {{ settings.currency_symbol }}{{ "{:,.2f}".format(p.wholesale_price) }}
+                        </td>
+                        <td class="py-3.5 px-4 text-xs font-black text-slate-900">
+                            {{ settings.currency_symbol }}{{ "{:,.2f}".format(p.retail_price) }}
+                        </td>
+
+                        <!-- Action Buttons -->
+                        <td class="py-3.5 px-4 text-right space-x-1">
+                            <button onclick="openStockAdjust({{ p.id }}, '{{ p.name }}', {{ p.stock_qty }})" class="p-1.5 rounded-lg text-slate-500 hover:text-sky-600 hover:bg-sky-50 transition" title="Quick Stock Adjustment (+/-)">
+                                <i data-lucide="sliders" class="w-4 h-4"></i>
+                            </button>
+                            <button onclick='openEditModal({{ p|tojson }})' class="p-1.5 rounded-lg text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 transition" title="Edit Product">
+                                <i data-lucide="edit-3" class="w-4 h-4"></i>
+                            </button>
+                            <form action="{{ url_for('delete_product', product_id=p.id) }}" method="POST" class="inline" onsubmit="return confirm('Are you sure you want to delete this product?');">
+                                <button type="submit" class="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition" title="Delete Product">
+                                    <i data-lucide="trash-2" class="w-4 h-4"></i>
+                                </button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="8" class="text-center py-12 text-slate-400">
+                            <i data-lucide="package-open" class="w-12 h-12 mx-auto mb-2 opacity-40"></i>
+                            <p class="font-medium">No products match your search or filter.</p>
+                            <button onclick="openAddModal()" class="mt-2 text-xs font-bold text-sky-600 hover:underline">
+                                + Add a new product now
+                            </button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+</div>
+
+<!-- Modal: Add New Product -->
+<div id="modalAddProduct" class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 hidden">
+    <div class="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl border border-slate-200">
+        <div class="p-5 bg-slate-900 text-white flex items-center justify-between">
+            <h3 class="font-bold text-base flex items-center gap-2">
+                <i data-lucide="plus-circle" class="w-5 h-5 text-sky-400"></i> Add New Product (Bag / Footwear)
+            </h3>
+            <button onclick="closeAddModal()" class="text-slate-400 hover:text-white">
+                <i data-lucide="x" class="w-5 h-5"></i>
+            </button>
+        </div>
+
+        <form action="{{ url_for('add_product') }}" method="POST" class="p-6 space-y-4">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                
+                <div>
+                    <label class="block text-xs font-bold text-slate-700 mb-1">Category *</label>
+                    <select name="category" id="addCategory" onchange="updateFormCategoryHints()" class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-semibold focus:bg-white">
+                        <option value="Bags">🎒 Bags (Backpack, Luggage, Handbag)</option>
+                        <option value="Shoes">👞 Shoes & Footwear (Sneakers, Formal, Slippers)</option>
+                        <option value="Accessories">👜 Accessories / Wallets / Belts</option>
+                    </select>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-bold text-slate-700 mb-1">Subcategory / Type</label>
+                    <input type="text" name="subcategory" id="addSubcategory" placeholder="e.g. Running Shoes / Backpack / Trolley" class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs">
+                </div>
+
+                <div class="sm:col-span-2">
+                    <label class="block text-xs font-bold text-slate-700 mb-1">Product Name / Model *</label>
+                    <input type="text" name="name" required placeholder="e.g. Wildcraft Pro Trek 40L or Nike Air Cushion Sneakers" class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs">
+                </div>
+
+                <div>
+                    <label class="block text-xs font-bold text-slate-700 mb-1">SKU / Barcode (Leave empty for auto-generated)</label>
+                    <input type="text" name="sku" placeholder="e.g. BAG-010 or SH-901" class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-mono">
+                </div>
+
+                <div>
+                    <label class="block text-xs font-bold text-slate-700 mb-1">Brand Name</label>
+                    <input type="text" name="brand" placeholder="e.g. Wildcraft, Bata, Skybags, Local" class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs">
+                </div>
+
+                <div>
+                    <label class="block text-xs font-bold text-slate-700 mb-1" id="lblSize">Size (e.g. 35L / 24-Inch / Free Size)</label>
+                    <input type="text" name="size" id="inpSize" placeholder="Size / Capacity" class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs">
+                </div>
+
+                <div>
+                    <label class="block text-xs font-bold text-slate-700 mb-1">Color</label>
+                    <input type="text" name="color" placeholder="e.g. Black / Brown / Navy / White" class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs">
+                </div>
+
+                <div>
+                    <label class="block text-xs font-bold text-slate-700 mb-1">Unit of Measure</label>
+                    <select name="unit" class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs">
+                        <option value="Pieces">Pieces (Pcs) - For Bags</option>
+                        <option value="Pairs">Pairs (Prs) - For Shoes</option>
+                        <option value="Dozens">Dozens (Dzn)</option>
+                        <option value="Cartons">Cartons (Ctn)</option>
+                    </select>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-bold text-slate-700 mb-1">Shelf / Warehouse Location</label>
+                    <input type="text" name="location" placeholder="e.g. Rack A-2, Floor Godown" class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs">
+                </div>
+            </div>
+
+            <!-- Pricing & Initial Stock -->
+            <div class="bg-slate-50 p-4 rounded-xl border border-slate-200 mt-2">
+                <h4 class="text-xs font-bold uppercase tracking-wider text-slate-500 mb-3">Pricing & Inventory Levels</h4>
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                        <label class="block text-xs font-bold text-slate-700 mb-1">Purchase Cost ({{ settings.currency_symbol }}) *</label>
+                        <input type="number" step="0.01" name="cost_price" required placeholder="0.00" class="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs font-semibold">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-indigo-700 mb-1">Wholesale Price ({{ settings.currency_symbol }}) *</label>
+                        <input type="number" step="0.01" name="wholesale_price" required placeholder="0.00" class="w-full px-3 py-2 bg-white border border-indigo-200 rounded-lg text-xs font-bold text-indigo-700">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-emerald-700 mb-1">Retail Price / MRP ({{ settings.currency_symbol }}) *</label>
+                        <input type="number" step="0.01" name="retail_price" required placeholder="0.00" class="w-full px-3 py-2 bg-white border border-emerald-200 rounded-lg text-xs font-black text-emerald-800">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-slate-700 mb-1">Opening Stock Quantity</label>
+                        <input type="number" name="stock_qty" value="0" min="0" class="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs font-bold">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-rose-700 mb-1">Min Stock Alert Level</label>
+                        <input type="number" name="min_alert_qty" value="5" min="0" class="w-full px-3 py-2 bg-white border border-rose-200 rounded-lg text-xs font-bold">
+                    </div>
+                </div>
+            </div>
+
+            <div class="flex items-center justify-end gap-2 pt-3 border-t border-slate-200">
+                <button type="button" onclick="closeAddModal()" class="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold">
+                    Cancel
+                </button>
+                <button type="submit" class="px-5 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold shadow-md shadow-sky-600/20">
+                    Save Product
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Modal: Edit Product -->
+<div id="modalEditProduct" class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 hidden">
+    <div class="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl border border-slate-200">
+        <div class="p-5 bg-indigo-900 text-white flex items-center justify-between">
+            <h3 class="font-bold text-base flex items-center gap-2">
+                <i data-lucide="edit" class="w-5 h-5 text-indigo-400"></i> Edit Product
+            </h3>
+            <button onclick="closeEditModal()" class="text-slate-400 hover:text-white">
+                <i data-lucide="x" class="w-5 h-5"></i>
+            </button>
+        </div>
+
+        <form id="editForm" method="POST" class="p-6 space-y-4">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-xs font-bold text-slate-700 mb-1">Category</label>
+                    <select name="category" id="editCategory" class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-semibold">
+                        <option value="Bags">Bags</option>
+                        <option value="Shoes">Shoes</option>
+                        <option value="Accessories">Accessories</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-slate-700 mb-1">Subcategory</label>
+                    <input type="text" name="subcategory" id="editSubcategory" class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs">
+                </div>
+                <div class="sm:col-span-2">
+                    <label class="block text-xs font-bold text-slate-700 mb-1">Product Name *</label>
+                    <input type="text" name="name" id="editName" required class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-slate-700 mb-1">Brand</label>
+                    <input type="text" name="brand" id="editBrand" class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-slate-700 mb-1">Size</label>
+                    <input type="text" name="size" id="editSize" class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-slate-700 mb-1">Color</label>
+                    <input type="text" name="color" id="editColor" class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-slate-700 mb-1">Unit</label>
+                    <input type="text" name="unit" id="editUnit" class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs">
+                </div>
+            </div>
+
+            <!-- Prices & Stock -->
+            <div class="bg-slate-50 p-4 rounded-xl border border-slate-200 mt-2">
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                        <label class="block text-xs font-bold text-slate-700 mb-1">Cost Price ({{ settings.currency_symbol }})</label>
+                        <input type="number" step="0.01" name="cost_price" id="editCost" required class="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs font-semibold">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-indigo-700 mb-1">Wholesale Price ({{ settings.currency_symbol }})</label>
+                        <input type="number" step="0.01" name="wholesale_price" id="editWholesale" required class="w-full px-3 py-2 bg-white border border-indigo-200 rounded-lg text-xs font-bold text-indigo-700">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-emerald-700 mb-1">Retail Price ({{ settings.currency_symbol }})</label>
+                        <input type="number" step="0.01" name="retail_price" id="editRetail" required class="w-full px-3 py-2 bg-white border border-emerald-200 rounded-lg text-xs font-black text-emerald-800">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-slate-700 mb-1">Current Stock Qty</label>
+                        <input type="number" name="stock_qty" id="editStock" required class="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs font-bold">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-rose-700 mb-1">Min Alert Qty</label>
+                        <input type="number" name="min_alert_qty" id="editMinAlert" required class="w-full px-3 py-2 bg-white border border-rose-200 rounded-lg text-xs font-bold">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-slate-700 mb-1">Rack Location</label>
+                        <input type="text" name="location" id="editLocation" class="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs">
+                    </div>
+                </div>
+            </div>
+
+            <div class="flex items-center justify-end gap-2 pt-3 border-t border-slate-200">
+                <button type="button" onclick="closeEditModal()" class="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold">
+                    Cancel
+                </button>
+                <button type="submit" class="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold">
+                    Update Changes
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Modal: Quick Stock Adjust -->
+<div id="modalStockAdjust" class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 hidden">
+    <div class="bg-white rounded-2xl max-w-sm w-full p-5 shadow-2xl border border-slate-200">
+        <h3 class="font-bold text-base text-slate-900 mb-1">Quick Stock Adjustment</h3>
+        <p id="adjustProdName" class="text-xs text-slate-500 mb-4"></p>
+
+        <div class="space-y-3">
+            <div class="flex items-center justify-between bg-slate-50 p-3 rounded-xl border border-slate-200">
+                <span class="text-xs text-slate-500">Current Stock:</span>
+                <span id="adjustCurrentStock" class="font-bold text-slate-800 text-base"></span>
+            </div>
+
+            <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1">Change Quantity (+ to add, - to subtract)</label>
+                <input type="number" id="inpStockChange" value="1" class="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-center text-lg font-black">
+                <div class="flex gap-2 mt-2">
+                    <button type="button" onclick="document.getElementById('inpStockChange').value = -1" class="flex-1 py-1 text-xs font-bold rounded-lg bg-rose-50 text-rose-700 border border-rose-200">-1 (Damaged/Loss)</button>
+                    <button type="button" onclick="document.getElementById('inpStockChange').value = 5" class="flex-1 py-1 text-xs font-bold rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200">+5 (Found)</button>
+                    <button type="button" onclick="document.getElementById('inpStockChange').value = 10" class="flex-1 py-1 text-xs font-bold rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200">+10</button>
+                </div>
+            </div>
+
+            <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1">Reason</label>
+                <input type="text" id="inpStockReason" value="Physical count correction" class="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs">
+            </div>
+
+            <div class="flex gap-2 pt-2">
+                <button type="button" onclick="closeStockAdjust()" class="flex-1 py-2 rounded-xl bg-slate-100 text-slate-700 text-xs font-semibold">Cancel</button>
+                <button type="button" onclick="submitStockAdjust()" class="flex-1 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold">Apply Adjustment</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let activeAdjustId = null;
+
+    function updateFormCategoryHints() {
+        const cat = document.getElementById('addCategory').value;
+        const lblSize = document.getElementById('lblSize');
+        const inpSize = document.getElementById('inpSize');
+        const subcat = document.getElementById('addSubcategory');
+
+        if (cat === 'Shoes') {
+            lblSize.innerText = "Shoe Size (UK/EU, e.g. UK 7, UK 8, UK 9)";
+            inpSize.placeholder = "e.g. UK 8";
+            subcat.placeholder = "e.g. Running Sneakers / Formal Oxford / Block Heels";
+        } else if (cat === 'Bags') {
+            lblSize.innerText = "Bag Size / Capacity (e.g. 35L / 24-Inch / Medium)";
+            inpSize.placeholder = "e.g. 35L or Medium";
+            subcat.placeholder = "e.g. Backpack / Handbag / Luggage / School Bag";
+        } else {
+            lblSize.innerText = "Size / Variant";
+            inpSize.placeholder = "Standard";
+            subcat.placeholder = "e.g. Leather Wallet / Belt";
+        }
+    }
+
+    function openAddModal() {
+        document.getElementById('modalAddProduct').classList.remove('hidden');
+        updateFormCategoryHints();
+    }
+    function closeAddModal() {
+        document.getElementById('modalAddProduct').classList.add('hidden');
+    }
+
+    function openEditModal(prod) {
+        document.getElementById('editForm').action = `/api/products/edit/${prod.id}`;
+        document.getElementById('editName').value = prod.name;
+        document.getElementById('editCategory').value = prod.category;
+        document.getElementById('editSubcategory').value = prod.subcategory || '';
+        document.getElementById('editBrand').value = prod.brand || '';
+        document.getElementById('editSize').value = prod.size || '';
+        document.getElementById('editColor').value = prod.color || '';
+        document.getElementById('editUnit').value = prod.unit || 'Pieces';
+        document.getElementById('editCost').value = prod.cost_price;
+        document.getElementById('editWholesale').value = prod.wholesale_price;
+        document.getElementById('editRetail').value = prod.retail_price;
+        document.getElementById('editStock').value = prod.stock_qty;
+        document.getElementById('editMinAlert').value = prod.min_alert_qty;
+        document.getElementById('editLocation').value = prod.location || '';
+
+        document.getElementById('modalEditProduct').classList.remove('hidden');
+        lucide.createIcons();
+    }
+    function closeEditModal() {
+        document.getElementById('modalEditProduct').classList.add('hidden');
+    }
+
+    function openStockAdjust(id, name, currentStock) {
+        activeAdjustId = id;
+        document.getElementById('adjustProdName').innerText = name;
+        document.getElementById('adjustCurrentStock').innerText = `${currentStock} units`;
+        document.getElementById('inpStockChange').value = 1;
+        document.getElementById('modalStockAdjust').classList.remove('hidden');
+    }
+    function closeStockAdjust() {
+        document.getElementById('modalStockAdjust').classList.add('hidden');
+        activeAdjustId = null;
+    }
+
+    async function submitStockAdjust() {
+        if (!activeAdjustId) return;
+        const change = parseInt(document.getElementById('inpStockChange').value) || 0;
+        const reason = document.getElementById('inpStockReason').value;
+
+        const form = new FormData();
+        form.append('quantity_change', change);
+        form.append('reason', reason);
+
+        try {
+            const res = await fetch(`/api/products/quick-adjust/${activeAdjustId}`, {
+                method: 'POST',
+                body: form
+            });
+            const data = await res.json();
+            if (data.success) {
+                window.location.reload();
+            } else {
+                alert(`Error: ${data.message}`);
+            }
+        } catch (e) {
+            alert(`Error: ${e.message}`);
+        }
+    }
+</script>
+{% endblock %}

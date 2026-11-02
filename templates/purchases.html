@@ -1,0 +1,340 @@
+{% extends 'base.html' %}
+
+{% block title %}Stock In / Bulk Purchases{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+
+    <!-- Header -->
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+        <div>
+            <h1 class="text-2xl font-bold text-slate-800 tracking-tight">Stock In (Bulk Purchases)</h1>
+            <p class="text-sm text-slate-500">Record factory shipments and supplier consignments to increase your inventory</p>
+        </div>
+        <div>
+            <button onclick="document.getElementById('purchaseFormCard').scrollIntoView({behavior: 'smooth'})" class="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-semibold text-sm shadow-sm transition">
+                <i data-lucide="plus" class="w-4 h-4"></i> New Stock In Entry
+            </button>
+        </div>
+    </div>
+
+    <!-- New Stock In Entry Form Card -->
+    <div id="purchaseFormCard" class="bg-white rounded-2xl border-2 border-sky-100 shadow-md overflow-hidden">
+        <div class="p-4 bg-sky-900 text-white flex items-center justify-between">
+            <h3 class="font-bold text-base flex items-center gap-2">
+                <i data-lucide="truck" class="w-5 h-5 text-sky-400"></i> Record New Bulk Stock Arrival
+            </h3>
+            <span class="text-xs text-sky-200">Automatically updates your live stock count</span>
+        </div>
+
+        <div class="p-6 space-y-5">
+            <!-- Supplier & Invoice Details -->
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div>
+                    <label class="block text-xs font-bold text-slate-700 mb-1">Supplier / Factory Name *</label>
+                    <input type="text" id="supName" list="supplierList" placeholder="e.g. Apex Factory Distributors" class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-semibold">
+                    <datalist id="supplierList">
+                        {% for sup in suppliers %}
+                        <option value="{{ sup.name }}"></option>
+                        {% endfor %}
+                    </datalist>
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-slate-700 mb-1">Supplier Bill / Invoice / Challan #</label>
+                    <input type="text" id="supInvoice" placeholder="e.g. CH-8902 or INV-991" class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-mono">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-slate-700 mb-1">Date Received</label>
+                    <input type="date" id="purchaseDate" value="{{ now.strftime('%Y-%m-%d') }}" class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-semibold">
+                </div>
+            </div>
+
+            <!-- Items Table in Purchase Entry -->
+            <div class="border border-slate-200 rounded-xl overflow-hidden">
+                <div class="p-3 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
+                    <h4 class="text-xs font-bold uppercase tracking-wider text-slate-700">Stock Arrival Items List</h4>
+                    <span class="text-xs text-slate-500">Add all products included in this consignment</span>
+                </div>
+
+                <div class="p-4 space-y-3">
+                    <!-- Quick Add Row -->
+                    <div class="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end bg-sky-50/60 p-3 rounded-xl border border-sky-100">
+                        <div class="sm:col-span-5">
+                            <label class="block text-[11px] font-bold text-slate-700 mb-1">Select Bag or Shoe Product</label>
+                            <select id="selProduct" class="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs" onchange="autoFillCost()">
+                                <option value="">-- Choose Product to Restock --</option>
+                                {% for p in products %}
+                                <option value="{{ p.id }}" data-cost="{{ p.cost_price }}" data-unit="{{ p.unit }}" data-name="{{ p.name }}" data-size="{{ p.size or '' }}" data-color="{{ p.color or '' }}" data-stock="{{ p.stock_qty }}">
+                                    [{{ p.category }}] {{ p.name }} {% if p.size %}(Sz: {{ p.size }}){% endif %} {% if p.color %}({{ p.color }}){% endif %} - Cur Stock: {{ p.stock_qty }}
+                                </option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="sm:col-span-2">
+                            <label class="block text-[11px] font-bold text-slate-700 mb-1">Quantity Received</label>
+                            <input type="number" id="inpQty" min="1" value="10" class="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs font-bold text-center">
+                        </div>
+                        <div class="sm:col-span-3">
+                            <label class="block text-[11px] font-bold text-slate-700 mb-1">Unit Cost Price ({{ settings.currency_symbol }})</label>
+                            <input type="number" step="0.01" id="inpCost" placeholder="0.00" class="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs font-semibold">
+                        </div>
+                        <div class="sm:col-span-2">
+                            <button type="button" onclick="addItemToStockInList()" class="w-full py-2 bg-sky-600 hover:bg-sky-700 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-1 shadow-sm">
+                                <i data-lucide="plus" class="w-4 h-4"></i> Add to List
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Items Added Table -->
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left text-xs">
+                            <thead class="bg-slate-100 text-slate-600 uppercase font-semibold">
+                                <tr>
+                                    <th class="py-2.5 px-3">Item Description</th>
+                                    <th class="py-2.5 px-3 text-center">Qty</th>
+                                    <th class="py-2.5 px-3">Unit Cost</th>
+                                    <th class="py-2.5 px-3 text-right">Total Cost</th>
+                                    <th class="py-2.5 px-3 text-center">Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="stockInItemsBody" class="divide-y divide-slate-100">
+                                <tr>
+                                    <td colspan="5" class="py-6 text-center text-slate-400">
+                                        No items added yet. Choose a product and quantity above and click "Add to List".
+                                    </td>
+                                </tr>
+                            </tbody>
+                            <tfoot class="border-t-2 border-slate-200 font-bold bg-slate-50 text-slate-900">
+                                <tr>
+                                    <td class="py-3 px-3">Total Consignment Value:</td>
+                                    <td id="totStockInQty" class="py-3 px-3 text-center">0</td>
+                                    <td></td>
+                                    <td id="totStockInCost" class="py-3 px-3 text-right text-sm font-black text-sky-700">{{ settings.currency_symbol }}0.00</td>
+                                    <td></td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Notes & Submission -->
+            <div class="flex flex-col sm:flex-row items-center justify-between gap-4 pt-2">
+                <input type="text" id="purchaseNotes" placeholder="Optional notes (e.g. Paid in full via bank transfer, Box 1-4)" class="w-full sm:w-1/2 px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs">
+                <button type="button" id="btnSaveStockIn" onclick="submitStockIn()" class="w-full sm:w-auto px-6 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs tracking-wider shadow-lg shadow-emerald-600/20 flex items-center justify-center gap-2">
+                    <i data-lucide="check" class="w-4 h-4"></i> RECEIVE & UPDATE INVENTORY
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Purchases History Table -->
+    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div class="p-4 bg-slate-50 border-b border-slate-200">
+            <h3 class="font-bold text-sm text-slate-800 flex items-center gap-2">
+                <i data-lucide="history" class="w-4 h-4 text-slate-500"></i> Stock-In Purchase History
+            </h3>
+        </div>
+
+        <div class="overflow-x-auto">
+            <table class="w-full text-left text-xs">
+                <thead class="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase font-semibold">
+                    <tr>
+                        <th class="py-3 px-4">Invoice / Challan #</th>
+                        <th class="py-3 px-4">Date</th>
+                        <th class="py-3 px-4">Supplier</th>
+                        <th class="py-3 px-4">Total Amount</th>
+                        <th class="py-3 px-4">Status</th>
+                        <th class="py-3 px-4">Notes</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100">
+                    {% for p in purchases %}
+                    <tr class="hover:bg-slate-50">
+                        <td class="py-3 px-4 font-bold text-slate-800 font-mono">{{ p.invoice_no }}</td>
+                        <td class="py-3 px-4 text-slate-600">{{ p.purchase_date }}</td>
+                        <td class="py-3 px-4 font-semibold text-slate-700">{{ p.supplier_name }}</td>
+                        <td class="py-3 px-4 font-black text-slate-900">{{ settings.currency_symbol }}{{ "{:,.2f}".format(p.total_amount) }}</td>
+                        <td class="py-3 px-4">
+                            <span class="px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                {{ p.payment_status }}
+                            </span>
+                        </td>
+                        <td class="py-3 px-4 text-slate-400">{{ p.notes or '-' }}</td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="6" class="text-center py-8 text-slate-400">
+                            No bulk purchases logged yet. Use the form above when new shipments arrive.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let stockInList = [];
+    const CURRENCY = "{{ settings.currency_symbol }}";
+
+    function autoFillCost() {
+        const sel = document.getElementById('selProduct');
+        const opt = sel.options[sel.selectedIndex];
+        if (sel.value) {
+            document.getElementById('inpCost').value = opt.dataset.cost;
+        }
+    }
+
+    function addItemToStockInList() {
+        const sel = document.getElementById('selProduct');
+        const opt = sel.options[sel.selectedIndex];
+        if (!sel.value) {
+            alert('Please select a product first!');
+            return;
+        }
+
+        const id = parseInt(sel.value);
+        const name = opt.dataset.name;
+        const size = opt.dataset.size;
+        const color = opt.dataset.color;
+        const unit = opt.dataset.unit;
+        const qty = parseInt(document.getElementById('inpQty').value) || 0;
+        const unit_cost = parseFloat(document.getElementById('inpCost').value) || 0;
+
+        if (qty <= 0) {
+            alert('Please enter a valid quantity greater than 0.');
+            return;
+        }
+        if (unit_cost < 0) {
+            alert('Please enter a valid unit cost.');
+            return;
+        }
+
+        const existing = stockInList.find(i => i.id === id);
+        if (existing) {
+            existing.quantity += qty;
+            existing.unit_cost = unit_cost;
+        } else {
+            stockInList.push({
+                id, name, size, color, unit, quantity: qty, unit_cost
+            });
+        }
+
+        renderStockInList();
+        sel.value = "";
+        document.getElementById('inpCost').value = "";
+        document.getElementById('inpQty').value = "10";
+    }
+
+    function removeStockInItem(idx) {
+        stockInList.splice(idx, 1);
+        renderStockInList();
+    }
+
+    function renderStockInList() {
+        const tbody = document.getElementById('stockInItemsBody');
+        if (stockInList.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="5" class="py-6 text-center text-slate-400">
+                        No items added yet. Choose a product and quantity above and click "Add to List".
+                    </td>
+                </tr>
+            `;
+            document.getElementById('totStockInQty').innerText = '0';
+            document.getElementById('totStockInCost').innerText = `${CURRENCY}0.00`;
+            return;
+        }
+
+        let html = '';
+        let totQty = 0;
+        let totCost = 0;
+
+        stockInList.forEach((item, idx) => {
+            const lineCost = item.quantity * item.unit_cost;
+            totQty += item.quantity;
+            totCost += lineCost;
+
+            html += `
+                <tr class="hover:bg-slate-50">
+                    <td class="py-2.5 px-3">
+                        <div class="font-bold text-slate-800">${item.name}</div>
+                        <div class="text-[11px] text-slate-400">${item.size ? `Size: ${item.size}` : ''} ${item.color ? `| Color: ${item.color}` : ''}</div>
+                    </td>
+                    <td class="py-2.5 px-3 text-center font-bold text-slate-800">
+                        ${item.quantity} ${item.unit}
+                    </td>
+                    <td class="py-2.5 px-3 font-semibold text-slate-700">
+                        ${CURRENCY}${item.unit_cost.toFixed(2)}
+                    </td>
+                    <td class="py-2.5 px-3 text-right font-black text-slate-900">
+                        ${CURRENCY}${lineCost.toFixed(2)}
+                    </td>
+                    <td class="py-2.5 px-3 text-center">
+                        <button onclick="removeStockInItem(${idx})" class="p-1 text-slate-400 hover:text-rose-600">
+                            <i data-lucide="trash-2" class="w-4 h-4"></i>
+                        </button>
+                    </td>
+                </tr>
+            `;
+        });
+
+        tbody.innerHTML = html;
+        document.getElementById('totStockInQty').innerText = totQty;
+        document.getElementById('totStockInCost').innerText = `${CURRENCY}${totCost.toFixed(2)}`;
+        lucide.createIcons();
+    }
+
+    async function submitStockIn() {
+        if (stockInList.length === 0) {
+            alert('Please add at least one item to the list before saving!');
+            return;
+        }
+
+        const supplierName = document.getElementById('supName').value.trim() || 'Direct Manufacturer';
+        const invoiceNo = document.getElementById('supInvoice').value.trim();
+        const purchaseDate = document.getElementById('purchaseDate').value;
+        const notes = document.getElementById('purchaseNotes').value.trim();
+
+        const btn = document.getElementById('btnSaveStockIn');
+        btn.disabled = true;
+        btn.innerHTML = `<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> Saving...`;
+        lucide.createIcons();
+
+        try {
+            const res = await fetch('/api/purchases/create', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    supplier_name: supplierName,
+                    invoice_no: invoiceNo,
+                    purchase_date: purchaseDate,
+                    notes: notes,
+                    items: stockInList
+                })
+            });
+
+            const data = await res.json();
+            if (data.success) {
+                alert('Stock-in logged and inventory counts updated successfully!');
+                window.location.reload();
+            } else {
+                alert(`Error: ${data.message}`);
+                btn.disabled = false;
+                btn.innerHTML = `<i data-lucide="check" class="w-4 h-4"></i> RECEIVE & UPDATE INVENTORY`;
+                lucide.createIcons();
+            }
+        } catch (e) {
+            alert(`Error: ${e.message}`);
+            btn.disabled = false;
+            btn.innerHTML = `<i data-lucide="check" class="w-4 h-4"></i> RECEIVE & UPDATE INVENTORY`;
+            lucide.createIcons();
+        }
+    }
+</script>
+{% endblock %}

@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Invoice #{{ sale.invoice_no }} - {{ settings.shop_name }}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @media print {
+            body { background: white !important; -webkit-print-color-adjust: exact; }
+            .no-print { display: none !important; }
+            .print-shadow-none { box-shadow: none !important; border: 1px solid #e2e8f0 !important; }
+        }
+    </style>
+</head>
+<body class="bg-slate-100 text-slate-800 p-4 sm:p-8 font-sans antialiased">
+
+    <!-- Action Toolbar (Hidden during print) -->
+    <div class="max-w-3xl mx-auto mb-4 flex justify-between items-center no-print">
+        <a href="{{ url_for('pos') }}" class="text-xs font-bold text-slate-600 hover:text-slate-900 bg-white px-3 py-2 rounded-lg border border-slate-300">
+            &larr; Back to POS / Billing
+        </a>
+        <div class="space-x-2">
+            <button onclick="window.print()" class="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold shadow-md">
+                🖨️ Print Invoice / Save as PDF
+            </button>
+        </div>
+    </div>
+
+    <!-- Printable Invoice Container -->
+    <div class="max-w-3xl mx-auto bg-white p-8 rounded-2xl shadow-lg border border-slate-200 print-shadow-none">
+        
+        <!-- Header -->
+        <div class="flex justify-between items-start border-b border-slate-200 pb-6">
+            <div>
+                <h1 class="text-2xl font-black text-slate-900 uppercase tracking-tight">{{ settings.shop_name }}</h1>
+                <p class="text-xs text-slate-500 font-semibold mt-0.5">{{ settings.tagline }}</p>
+                <div class="text-xs text-slate-600 mt-2 space-y-0.5">
+                    {% if settings.address %}<p>{{ settings.address }}</p>{% endif %}
+                    {% if settings.phone %}<p>Phone: {{ settings.phone }}</p>{% endif %}
+                    {% if settings.tax_number %}<p class="font-mono">{{ settings.tax_number }}</p>{% endif %}
+                </div>
+            </div>
+
+            <div class="text-right">
+                <span class="inline-block px-3 py-1 text-xs font-black rounded-lg {% if sale.sale_type == 'WHOLESALE' %}bg-indigo-100 text-indigo-800{% else %}bg-emerald-100 text-emerald-800{% endif %} uppercase">
+                    {% if sale.sale_type == 'WHOLESALE' %}Wholesale Tax Invoice{% else %}Retail Cash Memo{% endif %}
+                </span>
+                <p class="font-mono font-bold text-base text-slate-900 mt-2">{{ sale.invoice_no }}</p>
+                <p class="text-xs text-slate-500">Date: {{ sale.created_at[:16] }}</p>
+                <p class="text-xs text-slate-600 mt-1">Payment: <span class="font-bold">{{ sale.payment_mode }}</span> ({{ sale.payment_status }})</p>
+            </div>
+        </div>
+
+        <!-- Bill To / Customer Details -->
+        <div class="py-4 border-b border-slate-200 grid grid-cols-2 gap-4 text-xs">
+            <div>
+                <p class="font-bold text-slate-400 uppercase tracking-wider text-[10px]">Billed To / Customer:</p>
+                <h3 class="text-sm font-bold text-slate-900 mt-0.5">{{ sale.customer_name }}</h3>
+                {% if sale.customer_phone %}<p class="text-slate-600">Mobile: {{ sale.customer_phone }}</p>{% endif %}
+                {% if party and party.address %}<p class="text-slate-500">{{ party.address }}</p>{% endif %}
+                {% if party and party.gst_no %}<p class="text-slate-500 font-mono">GSTIN: {{ party.gst_no }}</p>{% endif %}
+            </div>
+            {% if party and sale.sale_type == 'WHOLESALE' %}
+            <div class="text-right">
+                <p class="font-bold text-slate-400 uppercase tracking-wider text-[10px]">Wholesale Account Summary:</p>
+                <p class="text-slate-600 mt-1">Current Ledger Balance: <span class="font-bold text-amber-700">{{ settings.currency_symbol }}{{ "{:,.2f}".format(party.current_balance) }}</span></p>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Line Items Table -->
+        <div class="py-4">
+            <table class="w-full text-left text-xs">
+                <thead>
+                    <tr class="border-b-2 border-slate-300 text-slate-600 uppercase font-bold text-[11px]">
+                        <th class="py-2.5">#</th>
+                        <th class="py-2.5">Item Description</th>
+                        <th class="py-2.5">Size / Color</th>
+                        <th class="py-2.5 text-center">Qty</th>
+                        <th class="py-2.5 text-right">Rate</th>
+                        <th class="py-2.5 text-right">Amount</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100">
+                    {% for item in items %}
+                    <tr>
+                        <td class="py-2.5 text-slate-400 font-mono">{{ loop.index }}</td>
+                        <td class="py-2.5">
+                            <span class="font-bold text-slate-800">{{ item.product_name }}</span>
+                            {% if item.sku %}<span class="text-[10px] text-slate-400 font-mono block">{{ item.sku }}</span>{% endif %}
+                        </td>
+                        <td class="py-2.5 text-slate-600">
+                            {{ item.size or '-' }} {% if item.color %}/ {{ item.color }}{% endif %}
+                        </td>
+                        <td class="py-2.5 text-center font-bold text-slate-800">
+                            {{ item.quantity }} {{ item.unit }}
+                        </td>
+                        <td class="py-2.5 text-right font-medium text-slate-700">
+                            {{ settings.currency_symbol }}{{ "{:,.2f}".format(item.unit_price) }}
+                        </td>
+                        <td class="py-2.5 text-right font-black text-slate-900">
+                            {{ settings.currency_symbol }}{{ "{:,.2f}".format(item.total_price) }}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Totals & Calculations -->
+        <div class="border-t border-slate-200 pt-4 flex justify-between items-start text-xs">
+            <div class="max-w-xs text-slate-500">
+                <p class="font-bold text-slate-700">Terms & Policy:</p>
+                <p class="mt-0.5 text-[11px] leading-relaxed">{{ settings.invoice_footer }}</p>
+                {% if sale.notes %}
+                <p class="mt-2 text-slate-600 italic">Note: {{ sale.notes }}</p>
+                {% endif %}
+            </div>
+
+            <div class="w-64 space-y-2">
+                <div class="flex justify-between text-slate-600">
+                    <span>Subtotal:</span>
+                    <span class="font-semibold">{{ settings.currency_symbol }}{{ "{:,.2f}".format(sale.subtotal) }}</span>
+                </div>
+                {% if sale.discount > 0 %}
+                <div class="flex justify-between text-rose-600">
+                    <span>Discount:</span>
+                    <span class="font-semibold">-{{ settings.currency_symbol }}{{ "{:,.2f}".format(sale.discount) }}</span>
+                </div>
+                {% endif %}
+                <div class="flex justify-between border-t border-slate-200 pt-2 text-sm font-black text-slate-900">
+                    <span>Grand Total:</span>
+                    <span class="text-base text-emerald-700">{{ settings.currency_symbol }}{{ "{:,.2f}".format(sale.grand_total) }}</span>
+                </div>
+                <div class="flex justify-between text-slate-700 font-semibold pt-1 border-t border-dashed border-slate-200">
+                    <span>Amount Paid:</span>
+                    <span>{{ settings.currency_symbol }}{{ "{:,.2f}".format(sale.paid_amount) }}</span>
+                </div>
+                {% if sale.balance_amount > 0 %}
+                <div class="flex justify-between text-amber-700 font-bold">
+                    <span>Balance Due (Udhar):</span>
+                    <span>{{ settings.currency_symbol }}{{ "{:,.2f}".format(sale.balance_amount) }}</span>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Signature Lines -->
+        <div class="mt-12 pt-6 border-t border-slate-200 flex justify-between items-end text-xs text-slate-400">
+            <div>
+                <p class="text-[10px]">System Generated Computer Invoice</p>
+            </div>
+            <div class="text-center">
+                <div class="w-40 border-b border-slate-300 mb-1"></div>
+                <p class="font-bold text-slate-700">Authorized Signatory</p>
+            </div>
+        </div>
+
+    </div>
+
+</body>
+</html>
