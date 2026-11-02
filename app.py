@@ -30,12 +30,15 @@ def get_settings():
     conn = get_connection()
     row = conn.execute("SELECT * FROM settings ORDER BY id ASC LIMIT 1").fetchone()
     conn.close()
+    static_logo_file = os.path.join(os.path.dirname(__file__), 'static', 'img', 'logo.png')
+    default_logo_url = '/static/img/logo.png' if os.path.exists(static_logo_file) else ''
+
     if row:
         d = dict(row)
         if not d.get('invoice_prefix'):
             d['invoice_prefix'] = 'SSIPL'
-        if not d.get('logo_path'):
-            d['logo_path'] = ''
+        if not d.get('logo_path') or len(d.get('logo_path', '').strip()) == 0:
+            d['logo_path'] = default_logo_url
         return d
     return {
         "shop_name": "SSIPL Bags & Footwear Hub",
@@ -45,7 +48,7 @@ def get_settings():
         "tax_number": "",
         "currency_symbol": "₹",
         "invoice_prefix": "SSIPL",
-        "logo_path": "",
+        "logo_path": default_logo_url,
         "invoice_footer": "Thank you for shopping with us!"
     }
 
