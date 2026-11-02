@@ -57,13 +57,15 @@ def init_db():
     );
     """)
 
-    # Auto-migration for existing databases
-    cursor.execute("PRAGMA table_info(settings)")
-    cols = [col[1] for col in cursor.fetchall()]
-    if 'logo_path' not in cols:
+    # Safe auto-migration for existing databases
+    try:
         cursor.execute("ALTER TABLE settings ADD COLUMN logo_path TEXT DEFAULT ''")
-    if 'invoice_prefix' not in cols:
+    except sqlite3.OperationalError:
+        pass
+    try:
         cursor.execute("ALTER TABLE settings ADD COLUMN invoice_prefix TEXT DEFAULT 'SSIPL'")
+    except sqlite3.OperationalError:
+        pass
 
     # 2. Products Table (Tailored for Bags & Shoes)
     cursor.execute("""
