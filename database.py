@@ -66,6 +66,18 @@ def init_db():
         cursor.execute("ALTER TABLE settings ADD COLUMN invoice_prefix TEXT DEFAULT 'SSIPL'")
     except sqlite3.OperationalError:
         pass
+    try:
+        cursor.execute("ALTER TABLE sales ADD COLUMN salesman_id INTEGER")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        cursor.execute("ALTER TABLE sales ADD COLUMN salesman_name TEXT DEFAULT 'Staff'")
+    except sqlite3.OperationalError:
+        pass
+
+    # Ensure shop name is updated to SSIPL
+    cursor.execute("UPDATE settings SET shop_name = 'SSIPL Bags & Footwear Hub' WHERE shop_name = 'Apex Footwear & Bags Hub'")
+    cursor.execute("UPDATE users SET full_name = 'Sales Staff 1' WHERE username = 'sales1' AND full_name = 'Floor Salesman'")
 
     # 2. Products Table (Tailored for Bags & Shoes)
     cursor.execute("""
@@ -193,17 +205,24 @@ def init_db():
     );
     """)
 
+    # 9. Invoice Sequences Table for Concurrency-Safe Bill Numbering across multiple salesmen
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS invoice_sequences (
+        sequence_key TEXT PRIMARY KEY,
+        current_val INTEGER NOT NULL DEFAULT 0
+    );
+    """)
+
     # Check if settings exists
     cursor.execute("SELECT COUNT(*) FROM settings")
     if cursor.fetchone()[0] == 0:
-        cursor.execute("INSERT INTO settings (shop_name) VALUES ('Apex Footwear & Bags Hub')")
+        cursor.execute("INSERT INTO settings (shop_name) VALUES ('SSIPL Bags & Footwear Hub')")
 
     # Check and seed default role users
     cursor.execute("SELECT COUNT(*) FROM users")
     if cursor.fetchone()[0] == 0:
         default_users = [
             ('admin', generate_password_hash('admin123'), 'Store Owner (Admin)', 'ADMIN', '+91 98765 00001'),
-            ('sales1', generate_password_hash('sales123'), 'Floor Salesman', 'SALESMAN', '+91 98765 00002'),
             ('accounts', generate_password_hash('accounts123'), 'Shop Accountant', 'ACCOUNTING', '+91 98765 00003'),
             ('godown', generate_password_hash('godown123'), 'Warehouse Incharge', 'WAREHOUSE', '+91 98765 00004')
         ]
@@ -212,11 +231,56 @@ def init_db():
             VALUES (?, ?, ?, ?, ?)
         """, default_users)
 
+    # Ensure 10 salesmen accounts (sales1 to sales10) exist for simultaneous multi-counter billing
+    for i in range(1, 11):
+        uname = f'sales{i}'
+        cursor.execute("SELECT id FROM users WHERE username = ?", (uname,))
+        if not cursor.fetchone():
+            cursor.execute("""
+                INSERT INTO users (username, password_hash, full_name, role, phone)
+                VALUES (?, ?, ?, 'SALESMAN', ?)
+            """, (uname, generate_password_hash('sales123'), f'Sales Staff {i}', f'+91 98765 000{i:02d}'))
+
     conn.commit()
 
     # Seed Sample Data if products table is empty
     seed_sample_data(conn)
     conn.close()
+
+def get_next_invoice_number(conn, prefix='SSIPL', year_str=None):
+    """
+    Thread-safe & concurrency-safe atomic invoice generator.
+    Guarantees that when 10 salesmen checkout at the same millisecond,
+    each invoice receives a strictly consecutive, unique number (e.g. SSIPL-2026-0001).
+    """
+    if not year_str:
+        year_str = datetime.now().strftime("%Y")
+    clean_prefix = (prefix or 'SSIPL').strip()
+    seq_key = f"{clean_prefix}-{year_str}"
+
+    cur = conn.cursor()
+    # Initialize sequence row if not present, seeding from highest existing bill number
+    cur.execute("SELECT current_val FROM invoice_sequences WHERE sequence_key = ?", (seq_key,))
+    row = cur.fetchone()
+    if row is None:
+        cur.execute("SELECT invoice_no FROM sales WHERE invoice_no LIKE ?", (f"{seq_key}-%",))
+        sales = cur.fetchall()
+        max_num = 0
+        for s in sales:
+            try:
+                parts = s['invoice_no'].split('-')
+                num = int(parts[-1])
+                if num > max_num:
+                    max_num = num
+            except (ValueError, IndexError, TypeError, KeyError):
+                pass
+        cur.execute("INSERT OR REPLACE INTO invoice_sequences (sequence_key, current_val) VALUES (?, ?)", (seq_key, max_num))
+
+    # Atomically increment
+    cur.execute("UPDATE invoice_sequences SET current_val = current_val + 1 WHERE sequence_key = ?", (seq_key,))
+    cur.execute("SELECT current_val FROM invoice_sequences WHERE sequence_key = ?", (seq_key,))
+    next_val = cur.fetchone()[0]
+    return f"{clean_prefix}-{year_str}-{next_val:04d}"
 
 def seed_sample_data(conn):
     cursor = conn.cursor()

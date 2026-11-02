@@ -103,7 +103,12 @@
                     <i data-lucide="receipt" class="w-5 h-5 text-emerald-400"></i>
                     <div>
                         <h3 class="font-bold text-base leading-tight">Current Invoice</h3>
-                        <p id="modeBadge" class="text-xs text-emerald-400 font-semibold">RETAIL SALE</p>
+                        <div class="flex items-center gap-2 mt-0.5">
+                            <span id="modeBadge" class="text-xs text-emerald-400 font-semibold">RETAIL SALE</span>
+                            <span class="text-[10px] text-sky-300 bg-slate-800 px-2 py-0.5 rounded border border-slate-700 font-mono">
+                                👤 {{ session.get('full_name', 'Sales Staff') }}
+                            </span>
+                        </div>
                     </div>
                 </div>
                 <button type="button" onclick="clearCart()" class="text-xs text-slate-400 hover:text-rose-400 transition flex items-center gap-1">

@@ -6,7 +6,7 @@ from functools import wraps
 from datetime import datetime, date
 from flask import Flask, render_template, request, jsonify, redirect, url_for, send_file, flash, session
 from werkzeug.security import check_password_hash, generate_password_hash
-from database import get_connection, init_db
+from database import get_connection, init_db, get_next_invoice_number
 
 app = Flask(__name__)
 # Secure session key
@@ -459,19 +459,23 @@ def create_sale():
         year_str = datetime.now().strftime("%Y")
         settings_data = get_settings()
         prefix = settings_data.get('invoice_prefix', 'SSIPL').strip() or 'SSIPL'
-        cur.execute("SELECT COUNT(*) FROM sales WHERE invoice_no LIKE ?", (f"{prefix}-{year_str}-%",))
-        count = cur.fetchone()[0] + 1
-        invoice_no = f"{prefix}-{year_str}-{count:04d}"
+        
+        # Concurrency-safe atomic invoice numbering (safe for 10+ simultaneous salesmen)
+        invoice_no = get_next_invoice_number(conn, prefix=prefix, year_str=year_str)
+
+        # Salesman attribution
+        salesman_id = session.get('user_id')
+        salesman_name = session.get('full_name') or session.get('username') or 'Staff'
 
         # Insert Sale record
         cur.execute("""
             INSERT INTO sales (invoice_no, sale_type, party_id, customer_name, customer_phone, 
                                subtotal, discount, grand_total, payment_mode, payment_status, 
-                               paid_amount, balance_amount, notes)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                               paid_amount, balance_amount, notes, salesman_id, salesman_name)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (invoice_no, sale_type, party_id, customer_name, customer_phone,
               subtotal, discount, grand_total, payment_mode, payment_status,
-              paid_amount, balance_amount, notes))
+              paid_amount, balance_amount, notes, salesman_id, salesman_name))
         sale_id = cur.lastrowid
 
         # Insert Sale Items & Deduct Stock
@@ -854,7 +858,7 @@ def export_sales_csv():
     conn = get_connection()
     cur = conn.cursor()
     cur.execute("""
-        SELECT invoice_no, sale_type, customer_name, customer_phone, subtotal, discount, grand_total, 
+        SELECT invoice_no, sale_type, salesman_name, customer_name, customer_phone, subtotal, discount, grand_total, 
                payment_mode, payment_status, paid_amount, balance_amount, created_at
         FROM sales ORDER BY id DESC
     """)
@@ -864,7 +868,7 @@ def export_sales_csv():
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow([
-        'Invoice No', 'Sale Type', 'Customer Name', 'Phone', 'Subtotal', 'Discount', 'Grand Total',
+        'Invoice No', 'Sale Type', 'Salesman / Staff', 'Customer Name', 'Phone', 'Subtotal', 'Discount', 'Grand Total',
         'Payment Mode', 'Payment Status', 'Paid Amount', 'Balance Due', 'Date & Time'
     ])
 

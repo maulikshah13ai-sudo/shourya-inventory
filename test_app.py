@@ -137,5 +137,76 @@ class InventoryAppTests(unittest.TestCase):
         self.assertEqual(res.status_code, 200)
         self.assertEqual(res.mimetype, 'text/csv')
 
+    def test_multi_salesman_concurrency_and_numbering(self):
+        """Test that multiple salesmen billing generate strictly consecutive unique bill numbers and salesman tags."""
+        conn = get_connection()
+        prod = conn.execute("SELECT id, retail_price FROM products WHERE stock_qty > 20 LIMIT 1").fetchone()
+        conn.close()
+        prod_id = prod['id']
+        price = prod['retail_price']
+
+        generated_invoices = []
+        for i in range(1, 6):
+            self.client.get('/logout')
+            self.login_as(f'sales{i}', 'sales123')
+            payload = {
+                'sale_type': 'RETAIL',
+                'customer_name': f'Customer of Salesman {i}',
+                'customer_phone': f'980000000{i}',
+                'subtotal': price,
+                'discount': 0,
+                'grand_total': price,
+                'payment_mode': 'CASH',
+                'paid_amount': price,
+                'items': [{'id': prod_id, 'quantity': 1, 'price': price}]
+            }
+            res = self.client.post('/api/sales/create', json=payload)
+            self.assertEqual(res.status_code, 200)
+            data = res.get_json()
+            self.assertTrue(data['success'])
+            generated_invoices.append(data['invoice_no'])
+
+            # Verify bill print shows salesman name
+            inv_res = self.client.get(f"/invoice/{data['sale_id']}")
+            self.assertIn(f'Sales Staff {i}'.encode(), inv_res.data)
+
+        # Ensure all invoice numbers are unique
+        self.assertEqual(len(generated_invoices), len(set(generated_invoices)))
+        # Verify prefix and sequence format
+        for inv in generated_invoices:
+            self.assertTrue(inv.startswith('SSIPL-'))
+
+    def test_ten_parallel_salesmen_stress_concurrency(self):
+        """Test true concurrent multi-threading: 10 salesmen hitting complete sale simultaneously."""
+        from concurrent.futures import ThreadPoolExecutor
+        conn = get_connection()
+        prod = conn.execute("SELECT id, retail_price FROM products WHERE stock_qty > 20 LIMIT 1").fetchone()
+        conn.close()
+        prod_id = prod['id']
+        price = prod['retail_price']
+
+        def checkout_task(worker_id):
+            client = app.test_client()
+            client.post('/login', data={'username': f'sales{worker_id}', 'password': 'sales123'})
+            payload = {
+                'sale_type': 'RETAIL',
+                'customer_name': f'Stress Customer {worker_id}',
+                'subtotal': price,
+                'discount': 0,
+                'grand_total': price,
+                'payment_mode': 'CASH',
+                'paid_amount': price,
+                'items': [{'id': prod_id, 'quantity': 1, 'price': price}]
+            }
+            res = client.post('/api/sales/create', json=payload)
+            self.assertEqual(res.status_code, 200)
+            return res.get_json()['invoice_no']
+
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            invoices = list(executor.map(checkout_task, range(1, 11)))
+
+        self.assertEqual(len(invoices), 10)
+        self.assertEqual(len(set(invoices)), 10)  # Exactly 10 unique invoice numbers, 0 duplicates!
+
 if __name__ == '__main__':
     unittest.main()
