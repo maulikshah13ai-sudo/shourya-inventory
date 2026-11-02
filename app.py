@@ -31,7 +31,12 @@ def get_settings():
     row = conn.execute("SELECT * FROM settings ORDER BY id ASC LIMIT 1").fetchone()
     conn.close()
     if row:
-        return dict(row)
+        d = dict(row)
+        if not d.get('invoice_prefix'):
+            d['invoice_prefix'] = 'SSIPL'
+        if not d.get('logo_path'):
+            d['logo_path'] = ''
+        return d
     return {
         "shop_name": "SSIPL Bags & Footwear Hub",
         "tagline": "Wholesale & Retail Dealers in Bags & Footwear",
@@ -39,6 +44,8 @@ def get_settings():
         "address": "Market Complex",
         "tax_number": "",
         "currency_symbol": "₹",
+        "invoice_prefix": "SSIPL",
+        "logo_path": "",
         "invoice_footer": "Thank you for shopping with us!"
     }
 
@@ -449,10 +456,12 @@ def create_sale():
         else:
             payment_status = 'PAID'
 
-        year_str = datetime.now().strftime("%Y%m")
-        cur.execute("SELECT COUNT(*) FROM sales WHERE invoice_no LIKE ?", (f"INV-{year_str}-%",))
+        year_str = datetime.now().strftime("%Y")
+        settings_data = get_settings()
+        prefix = settings_data.get('invoice_prefix', 'SSIPL').strip() or 'SSIPL'
+        cur.execute("SELECT COUNT(*) FROM sales WHERE invoice_no LIKE ?", (f"{prefix}-{year_str}-%",))
         count = cur.fetchone()[0] + 1
-        invoice_no = f"INV-{year_str}-{count:04d}"
+        invoice_no = f"{prefix}-{year_str}-{count:04d}"
 
         # Insert Sale record
         cur.execute("""
@@ -879,6 +888,7 @@ def settings():
     cur = conn.cursor()
 
     if request.method == 'POST':
+        import base64
         shop_name = request.form.get('shop_name', '').strip()
         tagline = request.form.get('tagline', '').strip()
         phone = request.form.get('phone', '').strip()
@@ -886,16 +896,38 @@ def settings():
         address = request.form.get('address', '').strip()
         tax_number = request.form.get('tax_number', '').strip()
         currency_symbol = request.form.get('currency_symbol', '₹').strip()
+        invoice_prefix = request.form.get('invoice_prefix', 'SSIPL').strip() or 'SSIPL'
         invoice_footer = request.form.get('invoice_footer', '').strip()
+        remove_logo = request.form.get('remove_logo') == '1'
 
-        cur.execute("""
-            UPDATE settings 
-            SET shop_name=?, tagline=?, phone=?, email=?, address=?, tax_number=?, currency_symbol=?, invoice_footer=?, updated_at=CURRENT_TIMESTAMP
-            WHERE id = (SELECT id FROM settings ORDER BY id ASC LIMIT 1)
-        """, (shop_name, tagline, phone, email, address, tax_number, currency_symbol, invoice_footer))
+        logo_file = request.files.get('logo')
+        if logo_file and logo_file.filename:
+            raw_bytes = logo_file.read()
+            mimetype = logo_file.content_type or 'image/png'
+            b64_str = base64.b64encode(raw_bytes).decode('utf-8')
+            logo_data_uri = f"data:{mimetype};base64,{b64_str}"
+
+            cur.execute("""
+                UPDATE settings 
+                SET shop_name=?, tagline=?, phone=?, email=?, address=?, tax_number=?, currency_symbol=?, invoice_prefix=?, logo_path=?, invoice_footer=?, updated_at=CURRENT_TIMESTAMP
+                WHERE id = (SELECT id FROM settings ORDER BY id ASC LIMIT 1)
+            """, (shop_name, tagline, phone, email, address, tax_number, currency_symbol, invoice_prefix, logo_data_uri, invoice_footer))
+        elif remove_logo:
+            cur.execute("""
+                UPDATE settings 
+                SET shop_name=?, tagline=?, phone=?, email=?, address=?, tax_number=?, currency_symbol=?, invoice_prefix=?, logo_path='', invoice_footer=?, updated_at=CURRENT_TIMESTAMP
+                WHERE id = (SELECT id FROM settings ORDER BY id ASC LIMIT 1)
+            """, (shop_name, tagline, phone, email, address, tax_number, currency_symbol, invoice_prefix, invoice_footer))
+        else:
+            cur.execute("""
+                UPDATE settings 
+                SET shop_name=?, tagline=?, phone=?, email=?, address=?, tax_number=?, currency_symbol=?, invoice_prefix=?, invoice_footer=?, updated_at=CURRENT_TIMESTAMP
+                WHERE id = (SELECT id FROM settings ORDER BY id ASC LIMIT 1)
+            """, (shop_name, tagline, phone, email, address, tax_number, currency_symbol, invoice_prefix, invoice_footer))
+
         conn.commit()
         conn.close()
-        flash('Settings updated successfully!', 'success')
+        flash('Shop profile, logo, and invoice settings updated successfully!', 'success')
         return redirect(url_for('settings'))
 
     cur.execute("SELECT * FROM settings ORDER BY id ASC LIMIT 1")

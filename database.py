@@ -43,17 +43,27 @@ def init_db():
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS settings (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        shop_name TEXT NOT NULL DEFAULT 'Step & Style Wholesale & Retail',
+        shop_name TEXT NOT NULL DEFAULT 'SSIPL Bags & Footwear Hub',
         tagline TEXT DEFAULT 'Wholesale & Retail Dealers in Bags & Footwear',
         phone TEXT DEFAULT '+91 98765 43210',
         email TEXT DEFAULT 'contact@stepstyle.com',
         address TEXT DEFAULT 'Shop #12, Market Complex, Wholesale Market',
         tax_number TEXT DEFAULT 'GSTIN: 27AAAAA0000A1Z5',
         currency_symbol TEXT DEFAULT '₹',
+        invoice_prefix TEXT DEFAULT 'SSIPL',
+        logo_path TEXT DEFAULT '',
         invoice_footer TEXT DEFAULT 'Thank you for your business! Goods once sold can be exchanged within 7 days with original invoice.',
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
     """)
+
+    # Auto-migration for existing databases
+    cursor.execute("PRAGMA table_info(settings)")
+    cols = [col[1] for col in cursor.fetchall()]
+    if 'logo_path' not in cols:
+        cursor.execute("ALTER TABLE settings ADD COLUMN logo_path TEXT DEFAULT ''")
+    if 'invoice_prefix' not in cols:
+        cursor.execute("ALTER TABLE settings ADD COLUMN invoice_prefix TEXT DEFAULT 'SSIPL'")
 
     # 2. Products Table (Tailored for Bags & Shoes)
     cursor.execute("""

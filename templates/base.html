@@ -41,9 +41,13 @@
             <div class="flex items-center justify-between h-16">
                 <!-- Brand / Logo -->
                 <div class="flex items-center space-x-3">
-                    <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-sky-500 to-indigo-600 flex items-center justify-center text-white shadow-lg font-bold text-xl">
-                        👞👜
-                    </div>
+                    {% if settings.logo_path %}
+                        <img src="{{ settings.logo_path }}" alt="Logo" class="w-10 h-10 object-contain rounded-xl bg-white p-1 shadow-md">
+                    {% else %}
+                        <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-sky-500 to-indigo-600 flex items-center justify-center text-white shadow-lg font-bold text-xl">
+                            👞👜
+                        </div>
+                    {% endif %}
                     <div>
                         <a href="{{ url_for('dashboard') }}" class="text-lg font-bold tracking-tight text-white hover:text-sky-300 transition flex items-center gap-2">
                             {{ settings.shop_name }}
