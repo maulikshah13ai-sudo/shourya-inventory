@@ -1,0 +1,660 @@
+{% extends 'base.html' %}
+
+{% block title %}Estimates & Sales Orders (Advance Booking){% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+
+    <!-- Header -->
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+        <div>
+            <h1 class="text-2xl font-bold text-slate-800 tracking-tight">Estimates & Sales Orders</h1>
+            <p class="text-sm text-slate-500">Book customer orders with advance token payments, and convert to final tax bills upon dispatch</p>
+        </div>
+        <div class="flex items-center gap-2">
+            <button onclick="openCreateEstimateModal()" class="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-sm shadow-sm transition">
+                <i data-lucide="plus-circle" class="w-4 h-4"></i> New Advance Booking
+            </button>
+        </div>
+    </div>
+
+    <!-- Quick Stats Cards -->
+    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
+            <div>
+                <p class="text-xs font-bold text-slate-400 uppercase tracking-wider">Pending Orders</p>
+                <h3 class="text-2xl font-black text-slate-800 mt-1">{{ active_count }}</h3>
+                <p class="text-[11px] text-amber-600 font-semibold mt-0.5">Awaiting packing & dispatch</p>
+            </div>
+            <div class="w-12 h-12 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center font-bold">
+                <i data-lucide="clock" class="w-6 h-6"></i>
+            </div>
+        </div>
+
+        <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
+            <div>
+                <p class="text-xs font-bold text-slate-400 uppercase tracking-wider">Advance Tokens Received</p>
+                <h3 class="text-2xl font-black text-emerald-700 mt-1">{{ settings.currency_symbol }}{{ "{:,.2f}".format(total_advance) }}</h3>
+                <p class="text-[11px] text-emerald-600 font-semibold mt-0.5">Collected upfront on booked orders</p>
+            </div>
+            <div class="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold">
+                <i data-lucide="wallet" class="w-6 h-6"></i>
+            </div>
+        </div>
+
+        <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
+            <div>
+                <p class="text-xs font-bold text-slate-400 uppercase tracking-wider">Pending Balance on Dispatch</p>
+                <h3 class="text-2xl font-black text-indigo-700 mt-1">{{ settings.currency_symbol }}{{ "{:,.2f}".format(pending_balance) }}</h3>
+                <p class="text-[11px] text-indigo-600 font-semibold mt-0.5">Receivable upon delivery</p>
+            </div>
+            <div class="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold">
+                <i data-lucide="truck" class="w-6 h-6"></i>
+            </div>
+        </div>
+    </div>
+
+    <!-- Filters & Search Toolbar -->
+    <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+        <form method="GET" action="{{ url_for('estimates') }}" class="flex flex-wrap items-center justify-between gap-3 text-xs">
+            <div class="flex flex-wrap items-center gap-2">
+                <a href="{{ url_for('estimates') }}" class="px-3 py-2 rounded-lg font-semibold {% if not status_filter %}bg-slate-800 text-white{% else %}bg-slate-100 text-slate-700 hover:bg-slate-200{% endif %}">
+                    All Orders
+                </a>
+                <a href="{{ url_for('estimates', status='BOOKED') }}" class="px-3 py-2 rounded-lg font-semibold {% if status_filter == 'BOOKED' %}bg-amber-600 text-white{% else %}bg-amber-50 text-amber-700 hover:bg-amber-100{% endif %}">
+                    ⏳ Pending Dispatch (Booked)
+                </a>
+                <a href="{{ url_for('estimates', status='DISPATCHED') }}" class="px-3 py-2 rounded-lg font-semibold {% if status_filter == 'DISPATCHED' %}bg-emerald-700 text-white{% else %}bg-emerald-50 text-emerald-700 hover:bg-emerald-100{% endif %}">
+                    ✓ Dispatched & Billed
+                </a>
+                <a href="{{ url_for('estimates', status='CANCELLED') }}" class="px-3 py-2 rounded-lg font-semibold {% if status_filter == 'CANCELLED' %}bg-rose-700 text-white{% else %}bg-rose-50 text-rose-700 hover:bg-rose-100{% endif %}">
+                    Cancelled
+                </a>
+            </div>
+
+            <div class="flex items-center gap-2">
+                <div class="relative">
+                    <input type="text" name="search" value="{{ search }}" placeholder="Search customer, mobile, order #..." 
+                           class="w-64 pl-8 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:bg-white focus:outline-none focus:border-sky-500">
+                    <i data-lucide="search" class="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5"></i>
+                </div>
+                <button type="submit" class="px-3 py-2 bg-slate-800 text-white rounded-lg font-semibold hover:bg-slate-700">Filter</button>
+                {% if search or status_filter %}
+                <a href="{{ url_for('estimates') }}" class="text-slate-400 hover:text-slate-600 font-medium">Reset</a>
+                {% endif %}
+            </div>
+        </form>
+    </div>
+
+    <!-- Orders Table -->
+    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div class="overflow-x-auto">
+            <table class="w-full text-left text-xs">
+                <thead class="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase font-semibold">
+                    <tr>
+                        <th class="py-3.5 px-4">Order / Estimate #</th>
+                        <th class="py-3.5 px-4">Booking Date</th>
+                        <th class="py-3.5 px-4">Customer Details</th>
+                        <th class="py-3.5 px-4">Type</th>
+                        <th class="py-3.5 px-4">Order Value</th>
+                        <th class="py-3.5 px-4">Advance Token</th>
+                        <th class="py-3.5 px-4">Balance Payable</th>
+                        <th class="py-3.5 px-4">Status</th>
+                        <th class="py-3.5 px-4 text-right">Actions</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100">
+                    {% for est in estimates %}
+                    <tr class="hover:bg-slate-50 transition">
+                        <td class="py-3 px-4 font-mono font-bold text-indigo-700">
+                            {{ est.estimate_no }}
+                            {% if est.converted_invoice_no %}
+                            <div class="text-[10px] text-emerald-700 font-bold">Bill: #{{ est.converted_invoice_no }}</div>
+                            {% endif %}
+                        </td>
+                        <td class="py-3 px-4 text-slate-600">
+                            <div>{{ est.created_at[:10] }}</div>
+                            {% if est.expected_dispatch_date %}
+                            <div class="text-[10px] text-indigo-600 font-semibold">Due: {{ est.expected_dispatch_date }}</div>
+                            {% endif %}
+                        </td>
+                        <td class="py-3 px-4">
+                            <div class="font-bold text-slate-800">{{ est.customer_name }}</div>
+                            {% if est.customer_phone %}<div class="text-slate-400">{{ est.customer_phone }}</div>{% endif %}
+                        </td>
+                        <td class="py-3 px-4">
+                            <span class="px-2 py-0.5 rounded text-[10px] font-bold {% if est.order_type == 'WHOLESALE' %}bg-indigo-50 text-indigo-700 border border-indigo-200{% else %}bg-emerald-50 text-emerald-700 border border-emerald-200{% endif %}">
+                                {{ est.order_type }}
+                            </span>
+                        </td>
+                        <td class="py-3 px-4 font-bold text-slate-900">
+                            {{ settings.currency_symbol }}{{ "{:,.2f}".format(est.grand_total) }}
+                        </td>
+                        <td class="py-3 px-4">
+                            <span class="font-bold text-emerald-700">{{ settings.currency_symbol }}{{ "{:,.2f}".format(est.advance_amount) }}</span>
+                            <span class="text-[10px] text-slate-400 block">{{ est.advance_payment_mode }}</span>
+                        </td>
+                        <td class="py-3 px-4 font-black {% if est.balance_amount > 0 %}text-amber-700{% else %}text-slate-400{% endif %}">
+                            {{ settings.currency_symbol }}{{ "{:,.2f}".format(est.balance_amount) }}
+                        </td>
+                        <td class="py-3 px-4">
+                            <span class="px-2.5 py-1 rounded-full text-[10px] font-bold inline-flex items-center gap-1
+                                {% if est.status == 'BOOKED' %}bg-amber-50 text-amber-700 border border-amber-200
+                                {% elif est.status == 'DISPATCHED' %}bg-emerald-50 text-emerald-700 border border-emerald-200
+                                {% else %}bg-rose-50 text-rose-700 border border-rose-200{% endif %}">
+                                <span class="w-1.5 h-1.5 rounded-full {% if est.status == 'BOOKED' %}bg-amber-500{% elif est.status == 'DISPATCHED' %}bg-emerald-500{% else %}bg-rose-500{% endif %}"></span>
+                                {{ est.status }}
+                            </span>
+                        </td>
+                        <td class="py-3 px-4 text-right space-x-1 whitespace-nowrap">
+                            <!-- Print Voucher -->
+                            <a href="{{ url_for('print_estimate', estimate_id=est.id) }}" target="_blank"
+                               class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200 font-bold transition text-xs">
+                                <i data-lucide="printer" class="w-3.5 h-3.5"></i> Voucher
+                            </a>
+
+                            <!-- Dispatch & Bill Button -->
+                            {% if est.status == 'BOOKED' %}
+                            <button type="button" onclick="openDispatchModal({{ est.id }}, '{{ est.estimate_no }}', '{{ est.customer_name }}', {{ est.grand_total }}, {{ est.advance_amount }}, {{ est.balance_amount }})"
+                                    class="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold transition text-xs shadow-sm">
+                                <i data-lucide="truck" class="w-3.5 h-3.5"></i> Dispatch & Bill
+                            </button>
+                            <button type="button" onclick="cancelEstimateOrder({{ est.id }})" class="p-1.5 text-slate-400 hover:text-rose-600 transition" title="Cancel Booking">
+                                <i data-lucide="x" class="w-4 h-4"></i>
+                            </button>
+                            {% elif est.converted_invoice_id %}
+                            <a href="{{ url_for('print_invoice', sale_id=est.converted_invoice_id) }}" target="_blank"
+                               class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-50 text-emerald-800 hover:bg-emerald-100 font-bold transition text-xs border border-emerald-200">
+                                <i data-lucide="receipt" class="w-3.5 h-3.5"></i> Final Bill
+                            </a>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="9" class="text-center py-12 text-slate-400">
+                            <i data-lucide="clipboard-list" class="w-10 h-10 mx-auto mb-2 opacity-30"></i>
+                            <p class="font-medium">No sales orders or advance estimates found.</p>
+                            <p class="text-[11px] text-slate-400 mt-0.5">Click "New Advance Booking" above to record a customer order with token payment.</p>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+</div>
+
+<!-- New Advance Booking / Estimate Modal -->
+<div id="createEstimateModal" class="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs hidden items-center justify-center p-4">
+    <div class="bg-white rounded-3xl max-w-3xl w-full p-6 shadow-2xl border border-slate-100 space-y-4 max-h-[90vh] overflow-y-auto">
+        <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+            <div class="flex items-center gap-2">
+                <div class="w-9 h-9 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold">
+                    <i data-lucide="clipboard-pen" class="w-5 h-5"></i>
+                </div>
+                <div>
+                    <h3 class="font-bold text-base text-slate-800">New Advance Order Booking (Estimate)</h3>
+                    <p class="text-xs text-slate-500">Record customer advance token, goods reservation, and expected dispatch</p>
+                </div>
+            </div>
+            <button onclick="closeCreateEstimateModal()" class="text-slate-400 hover:text-slate-600">&times;</button>
+        </div>
+
+        <div id="estErrorMsg" class="hidden p-3 rounded-xl text-xs font-semibold bg-rose-50 text-rose-800 border border-rose-200"></div>
+
+        <!-- Customer & Order Details Form -->
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+            <div>
+                <label class="block font-bold text-slate-700 mb-1">Customer / Buyer *</label>
+                <input type="text" id="estCustomerName" list="estPartiesList" placeholder="e.g. Metro Fashion or Name" class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl font-semibold">
+                <datalist id="estPartiesList">
+                    {% for p in parties %}
+                    <option value="{{ p.name }}"></option>
+                    {% endfor %}
+                </datalist>
+            </div>
+            <div>
+                <label class="block font-bold text-slate-700 mb-1">Mobile / WhatsApp Number</label>
+                <input type="text" id="estCustomerPhone" placeholder="Mobile Number" class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl font-semibold">
+            </div>
+            <div>
+                <label class="block font-bold text-slate-700 mb-1">Order Pricing Type</label>
+                <select id="estOrderType" onchange="handleEstOrderTypeChange()" class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl font-semibold">
+                    <option value="WHOLESALE">Wholesale Rate</option>
+                    <option value="RETAIL">Retail Rate</option>
+                </select>
+            </div>
+        </div>
+
+        <!-- Product Selector Row -->
+        <div class="p-3 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
+            <span class="text-xs font-bold text-slate-700 flex items-center gap-1">
+                <i data-lucide="plus" class="w-3.5 h-3.5 text-indigo-600"></i> Add Item to Booking:
+            </span>
+            <div class="grid grid-cols-1 sm:grid-cols-12 gap-2 text-xs items-end">
+                <div class="sm:col-span-5">
+                    <label class="block text-[11px] text-slate-500 mb-0.5">Select Bag or Shoe</label>
+                    <select id="estProductSelect" onchange="handleEstProductSelect(this)" class="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl">
+                        <option value="">-- Choose from Catalog --</option>
+                        {% for prod in products %}
+                        <option value="{{ prod.id }}" data-sku="{{ prod.sku }}" data-name="{{ prod.name }}" data-size="{{ prod.size or '' }}" data-color="{{ prod.color or '' }}" data-unit="{{ prod.unit }}" data-ws="{{ prod.wholesale_price }}" data-rt="{{ prod.retail_price }}" data-stock="{{ prod.stock_qty }}">
+                            {{ prod.name }} ({{ prod.sku }}) - {{ prod.size or '' }} {{ prod.color or '' }} [Stock: {{ prod.stock_qty }}]
+                        </option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="sm:col-span-2">
+                    <label class="block text-[11px] text-slate-500 mb-0.5">Quantity</label>
+                    <input type="number" id="estItemQty" value="1" min="1" class="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl font-bold">
+                </div>
+                <div class="sm:col-span-3">
+                    <label class="block text-[11px] text-slate-500 mb-0.5">Agreed Rate ({{ settings.currency_symbol }})</label>
+                    <input type="number" id="estItemRate" step="0.01" class="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl font-bold">
+                </div>
+                <div class="sm:col-span-2">
+                    <button type="button" onclick="addEstItem()" class="w-full py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-xl font-bold text-xs">
+                        + Add Item
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Booked Items Table -->
+        <div class="border border-slate-200 rounded-2xl overflow-hidden">
+            <table class="w-full text-left text-xs">
+                <thead class="bg-slate-100 text-slate-600 font-bold">
+                    <tr>
+                        <th class="py-2 px-3">Item</th>
+                        <th class="py-2 px-3">Size/Color</th>
+                        <th class="py-2 px-3 text-center">Qty</th>
+                        <th class="py-2 px-3 text-right">Rate</th>
+                        <th class="py-2 px-3 text-right">Total</th>
+                        <th class="py-2 px-3 text-center">Action</th>
+                    </tr>
+                </thead>
+                <tbody id="estItemsTbody" class="divide-y divide-slate-100">
+                    <tr>
+                        <td colspan="6" class="text-center py-6 text-slate-400">No items added to this booking yet.</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Financials & Advance Payment Token Row -->
+        <div class="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-3">
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                <div>
+                    <label class="block font-bold text-slate-700 mb-1">Expected Dispatch Date</label>
+                    <input type="date" id="estDispatchDate" class="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl">
+                </div>
+                <div class="sm:col-span-2">
+                    <label class="block font-bold text-slate-700 mb-1">Order Notes (e.g. Packing / Transport Instructions)</label>
+                    <input type="text" id="estNotes" placeholder="e.g. Pack in 3 cartons, deliver to bus parcel" class="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl">
+                </div>
+            </div>
+
+            <div class="border-t border-slate-200 pt-3 grid grid-cols-1 sm:grid-cols-2 gap-4 items-center">
+                <!-- Advance Payment Input -->
+                <div class="p-3 bg-emerald-50 rounded-xl border border-emerald-200 space-y-2">
+                    <span class="text-xs font-bold text-emerald-900 block flex items-center gap-1">
+                        <i data-lucide="banknote" class="w-4 h-4 text-emerald-600"></i> Advance Token Payment Received:
+                    </span>
+                    <div class="grid grid-cols-2 gap-2 text-xs">
+                        <div>
+                            <label class="block text-[11px] text-emerald-700 mb-0.5">Advance Amount ({{ settings.currency_symbol }})</label>
+                            <input type="number" id="estAdvanceAmount" value="0" min="0" step="0.01" oninput="calculateEstTotals()" class="w-full px-3 py-1.5 bg-white border border-emerald-300 rounded-lg font-bold text-emerald-900">
+                        </div>
+                        <div>
+                            <label class="block text-[11px] text-emerald-700 mb-0.5">Payment Mode</label>
+                            <select id="estAdvanceMode" class="w-full px-3 py-1.5 bg-white border border-emerald-300 rounded-lg font-bold text-slate-800">
+                                <option value="CASH">Cash</option>
+                                <option value="UPI">UPI / GPay / PhonePe</option>
+                                <option value="BANK_TRANSFER">Bank Transfer (NEFT/RTGS)</option>
+                                <option value="CHEQUE">Cheque</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Totals Breakdown -->
+                <div class="space-y-1.5 text-xs text-slate-700 text-right pr-2">
+                    <div class="flex justify-between">
+                        <span class="text-slate-500">Order Subtotal:</span>
+                        <span id="estSubtotalTxt" class="font-bold">₹0.00</span>
+                    </div>
+                    <div class="flex justify-between items-center">
+                        <span class="text-slate-500">Discount (₹):</span>
+                        <input type="number" id="estDiscountInput" value="0" min="0" oninput="calculateEstTotals()" class="w-20 px-2 py-0.5 text-right bg-white border border-slate-300 rounded font-semibold text-xs">
+                    </div>
+                    <div class="flex justify-between text-sm font-black text-slate-900 pt-1 border-t border-slate-200">
+                        <span>Grand Total:</span>
+                        <span id="estGrandTotalTxt" class="text-indigo-700">₹0.00</span>
+                    </div>
+                    <div class="flex justify-between text-xs font-bold text-amber-700 pt-1">
+                        <span>Balance Payable on Dispatch:</span>
+                        <span id="estBalanceTxt">₹0.00</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+            <button type="button" onclick="closeCreateEstimateModal()" class="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100">Cancel</button>
+            <button type="button" id="btnSaveEstimate" onclick="submitCreateEstimate()" class="px-5 py-2.5 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm flex items-center gap-1.5 transition">
+                <i data-lucide="check" class="w-4 h-4"></i> Save Booking & Print Voucher
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Dispatch & Bill Modal -->
+<div id="dispatchModal" class="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs hidden items-center justify-center p-4">
+    <div class="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-100 space-y-4">
+        <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+            <div class="flex items-center gap-2">
+                <div class="w-9 h-9 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold">
+                    <i data-lucide="truck" class="w-5 h-5"></i>
+                </div>
+                <div>
+                    <h3 class="font-bold text-base text-slate-800">Dispatch & Convert to Invoice</h3>
+                    <p class="text-xs text-slate-500">Deduct stock and issue official tax bill</p>
+                </div>
+            </div>
+            <button onclick="closeDispatchModal()" class="text-slate-400 hover:text-slate-600">&times;</button>
+        </div>
+
+        <div id="dispatchMsg" class="hidden p-3 rounded-xl text-xs font-semibold"></div>
+
+        <div class="p-3 bg-slate-50 rounded-xl space-y-1.5 text-xs text-slate-700">
+            <div class="flex justify-between"><span class="text-slate-500">Order Ref:</span> <span id="dispOrderNo" class="font-mono font-bold text-indigo-700"></span></div>
+            <div class="flex justify-between"><span class="text-slate-500">Customer:</span> <span id="dispCustName" class="font-bold"></span></div>
+            <div class="flex justify-between"><span class="text-slate-500">Order Total:</span> <span id="dispTotalVal" class="font-bold"></span></div>
+            <div class="flex justify-between text-emerald-700 font-bold"><span>Advance Already Paid:</span> <span id="dispAdvPaid"></span></div>
+            <div class="flex justify-between border-t border-slate-200 pt-1 font-black text-amber-700 text-sm">
+                <span>Remaining Balance Due:</span>
+                <span id="dispBalDue"></span>
+            </div>
+        </div>
+
+        <div class="space-y-3 text-xs">
+            <div>
+                <label class="block font-bold text-slate-700 mb-1">Additional Payment Collected at Delivery ({{ settings.currency_symbol }})</label>
+                <input type="number" id="dispAdditionalPaid" step="0.01" class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl font-bold text-sm text-slate-900">
+                <p class="text-[10px] text-slate-400 mt-0.5">Defaults to remaining balance. If fully on credit, set 0.</p>
+            </div>
+            <div>
+                <label class="block font-bold text-slate-700 mb-1">Payment Mode for Delivery Balance</label>
+                <select id="dispPayMode" class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl font-bold">
+                    <option value="CASH">Cash</option>
+                    <option value="UPI">UPI / GPay / PhonePe</option>
+                    <option value="CREDIT">Wholesale Credit (Udhar)</option>
+                    <option value="CARD">Card</option>
+                    <option value="BANK_TRANSFER">Bank Transfer</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+            <button type="button" onclick="closeDispatchModal()" class="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100">Cancel</button>
+            <button type="button" id="btnConfirmDispatch" onclick="confirmDispatch()" class="px-5 py-2.5 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm flex items-center gap-1.5 transition">
+                <i data-lucide="check" class="w-4 h-4"></i> Confirm Dispatch & Generate Bill
+            </button>
+        </div>
+    </div>
+</div>
+
+<script>
+    const CURRENCY = "{{ settings.currency_symbol }}";
+    let estCartItems = [];
+    let currentDispatchEstimateId = null;
+
+    function openCreateEstimateModal() {
+        document.getElementById('createEstimateModal').classList.remove('hidden');
+        document.getElementById('createEstimateModal').classList.add('flex');
+        document.getElementById('estErrorMsg').classList.add('hidden');
+        estCartItems = [];
+        renderEstItems();
+        calculateEstTotals();
+    }
+
+    function closeCreateEstimateModal() {
+        document.getElementById('createEstimateModal').classList.add('hidden');
+        document.getElementById('createEstimateModal').classList.remove('flex');
+    }
+
+    function handleEstProductSelect(sel) {
+        const opt = sel.options[sel.selectedIndex];
+        if (!opt || !opt.value) return;
+        const orderType = document.getElementById('estOrderType').value;
+        const rate = (orderType === 'WHOLESALE') ? opt.dataset.ws : opt.dataset.rt;
+        document.getElementById('estItemRate').value = rate;
+    }
+
+    function handleEstOrderTypeChange() {
+        const sel = document.getElementById('estProductSelect');
+        if (sel.value) handleEstProductSelect(sel);
+    }
+
+    function addEstItem() {
+        const sel = document.getElementById('estProductSelect');
+        const opt = sel.options[sel.selectedIndex];
+        if (!opt || !opt.value) {
+            alert('Please select a product first!');
+            return;
+        }
+
+        const qty = parseInt(document.getElementById('estItemQty').value) || 1;
+        const rate = parseFloat(document.getElementById('estItemRate').value) || 0;
+
+        estCartItems.push({
+            id: parseInt(opt.value),
+            name: opt.dataset.name,
+            sku: opt.dataset.sku,
+            size: opt.dataset.size,
+            color: opt.dataset.color,
+            unit: opt.dataset.unit,
+            quantity: qty,
+            price: rate
+        });
+
+        sel.selectedIndex = 0;
+        document.getElementById('estItemQty').value = 1;
+        document.getElementById('estItemRate').value = '';
+
+        renderEstItems();
+        calculateEstTotals();
+    }
+
+    function removeEstItem(index) {
+        estCartItems.splice(index, 1);
+        renderEstItems();
+        calculateEstTotals();
+    }
+
+    function renderEstItems() {
+        const tbody = document.getElementById('estItemsTbody');
+        if (estCartItems.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="6" class="text-center py-6 text-slate-400">No items added to this booking yet.</td></tr>`;
+            return;
+        }
+
+        let html = '';
+        estCartItems.forEach((it, idx) => {
+            const tot = it.quantity * it.price;
+            html += `
+                <tr class="hover:bg-slate-50">
+                    <td class="py-2 px-3 font-semibold text-slate-800">${it.name} <span class="text-[10px] text-slate-400 block">${it.sku}</span></td>
+                    <td class="py-2 px-3 text-slate-600">${it.size} ${it.color}</td>
+                    <td class="py-2 px-3 text-center font-bold">${it.quantity} ${it.unit}</td>
+                    <td class="py-2 px-3 text-right font-medium">${CURRENCY}${it.price.toFixed(2)}</td>
+                    <td class="py-2 px-3 text-right font-bold text-slate-900">${CURRENCY}${tot.toFixed(2)}</td>
+                    <td class="py-2 px-3 text-center">
+                        <button type="button" onclick="removeEstItem(${idx})" class="text-rose-500 hover:text-rose-700">
+                            <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+                        </button>
+                    </td>
+                </tr>
+            `;
+        });
+        tbody.innerHTML = html;
+        lucide.createIcons();
+    }
+
+    function calculateEstTotals() {
+        let subtotal = 0;
+        estCartItems.forEach(it => {
+            subtotal += it.quantity * it.price;
+        });
+
+        const discount = parseFloat(document.getElementById('estDiscountInput').value) || 0;
+        const grandTotal = Math.max(0, subtotal - discount);
+        const advance = parseFloat(document.getElementById('estAdvanceAmount').value) || 0;
+        const balance = Math.max(0, grandTotal - advance);
+
+        document.getElementById('estSubtotalTxt').innerText = `${CURRENCY}${subtotal.toFixed(2)}`;
+        document.getElementById('estGrandTotalTxt').innerText = `${CURRENCY}${grandTotal.toFixed(2)}`;
+        document.getElementById('estBalanceTxt').innerText = `${CURRENCY}${balance.toFixed(2)}`;
+    }
+
+    async function submitCreateEstimate() {
+        if (estCartItems.length === 0) {
+            alert('Please add at least one item to this booking order!');
+            return;
+        }
+
+        const custName = document.getElementById('estCustomerName').value.trim() || 'Walk-in Customer';
+        const custPhone = document.getElementById('estCustomerPhone').value.trim();
+        const orderType = document.getElementById('estOrderType').value;
+        const dispatchDate = document.getElementById('estDispatchDate').value;
+        const notes = document.getElementById('estNotes').value.trim();
+
+        let subtotal = 0;
+        estCartItems.forEach(it => { subtotal += it.quantity * it.price; });
+        const discount = parseFloat(document.getElementById('estDiscountInput').value) || 0;
+        const grandTotal = Math.max(0, subtotal - discount);
+        const advance = parseFloat(document.getElementById('estAdvanceAmount').value) || 0;
+        const advanceMode = document.getElementById('estAdvanceMode').value;
+
+        const btn = document.getElementById('btnSaveEstimate');
+        btn.disabled = true;
+        btn.innerHTML = `<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> Saving...`;
+        lucide.createIcons();
+
+        try {
+            const res = await fetch('/api/estimates/create', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    customer_name: custName,
+                    customer_phone: custPhone,
+                    order_type: orderType,
+                    expected_dispatch_date: dispatchDate,
+                    notes: notes,
+                    subtotal: subtotal,
+                    discount: discount,
+                    grand_total: grandTotal,
+                    advance_amount: advance,
+                    advance_payment_mode: advanceMode,
+                    items: estCartItems
+                })
+            });
+
+            const data = await res.json();
+            if (data.success) {
+                // Open print window
+                window.open(`/estimate/${data.estimate_id}/print`, '_blank');
+                window.location.reload();
+            } else {
+                alert(`Error: ${data.message}`);
+                btn.disabled = false;
+                btn.innerHTML = `<i data-lucide="check" class="w-4 h-4"></i> Save Booking & Print Voucher`;
+                lucide.createIcons();
+            }
+        } catch (e) {
+            alert(`Error: ${e.message}`);
+            btn.disabled = false;
+            btn.innerHTML = `<i data-lucide="check" class="w-4 h-4"></i> Save Booking & Print Voucher`;
+            lucide.createIcons();
+        }
+    }
+
+    // Dispatch Modal
+    function openDispatchModal(id, estNo, custName, grandTotal, advPaid, balDue) {
+        currentDispatchEstimateId = id;
+        document.getElementById('dispatchModal').classList.remove('hidden');
+        document.getElementById('dispatchModal').classList.add('flex');
+        document.getElementById('dispatchMsg').classList.add('hidden');
+
+        document.getElementById('dispOrderNo').innerText = estNo;
+        document.getElementById('dispCustName').innerText = custName;
+        document.getElementById('dispTotalVal').innerText = `${CURRENCY}${grandTotal.toFixed(2)}`;
+        document.getElementById('dispAdvPaid').innerText = `${CURRENCY}${advPaid.toFixed(2)}`;
+        document.getElementById('dispBalDue').innerText = `${CURRENCY}${balDue.toFixed(2)}`;
+        document.getElementById('dispAdditionalPaid').value = balDue.toFixed(2);
+    }
+
+    function closeDispatchModal() {
+        document.getElementById('dispatchModal').classList.add('hidden');
+        document.getElementById('dispatchModal').classList.remove('flex');
+    }
+
+    async function confirmDispatch() {
+        if (!currentDispatchEstimateId) return;
+
+        const additionalPaid = parseFloat(document.getElementById('dispAdditionalPaid').value) || 0;
+        const payMode = document.getElementById('dispPayMode').value;
+
+        const btn = document.getElementById('btnConfirmDispatch');
+        btn.disabled = true;
+        btn.innerHTML = `<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> Dispatching & Invoicing...`;
+        lucide.createIcons();
+
+        try {
+            const res = await fetch(`/api/estimates/${currentDispatchEstimateId}/dispatch`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    additional_paid_amount: additionalPaid,
+                    dispatch_payment_mode: payMode
+                })
+            });
+
+            const data = await res.json();
+            if (data.success) {
+                // Open final tax invoice
+                window.open(`/invoice/${data.invoice_id}`, '_blank');
+                window.location.reload();
+            } else {
+                const msgBox = document.getElementById('dispatchMsg');
+                msgBox.className = "p-3 rounded-xl text-xs font-semibold bg-rose-50 text-rose-800 border border-rose-200 block";
+                msgBox.innerText = `Dispatch Failed: ${data.message}`;
+                btn.disabled = false;
+                btn.innerHTML = `<i data-lucide="check" class="w-4 h-4"></i> Confirm Dispatch & Generate Bill`;
+                lucide.createIcons();
+            }
+        } catch (e) {
+            alert(`Error: ${e.message}`);
+            btn.disabled = false;
+            btn.innerHTML = `<i data-lucide="check" class="w-4 h-4"></i> Confirm Dispatch & Generate Bill`;
+            lucide.createIcons();
+        }
+    }
+
+    async function cancelEstimateOrder(id) {
+        if (!confirm('Are you sure you want to cancel this booking order?')) return;
+        try {
+            const res = await fetch(`/api/estimates/${id}/cancel`, { method: 'POST' });
+            const data = await res.json();
+            if (data.success) {
+                window.location.reload();
+            } else {
+                alert(`Error: ${data.message}`);
+            }
+        } catch (e) {
+            alert(`Error: ${e.message}`);
+        }
+    }
+</script>
+{% endblock %}

@@ -83,6 +83,15 @@
                     {% endif %}
 
                     {% if current_user.role in ('ADMIN', 'SALESMAN', 'ACCOUNTING') %}
+                    <a href="{{ url_for('estimates') }}" class="px-3 py-2 rounded-lg text-sm font-medium {% if request.path == '/estimates' %}bg-sky-600 text-white{% else %}text-slate-300 hover:bg-slate-800 hover:text-white{% endif %} flex items-center gap-1.5 transition">
+                        <i data-lucide="clipboard-list" class="w-4 h-4"></i> Estimates / Orders
+                        {% if pending_estimates_count and pending_estimates_count > 0 %}
+                        <span class="px-1.5 py-0.5 bg-amber-500 text-slate-900 font-black text-[10px] rounded-full leading-none">{{ pending_estimates_count }}</span>
+                        {% endif %}
+                    </a>
+                    {% endif %}
+
+                    {% if current_user.role in ('ADMIN', 'SALESMAN', 'ACCOUNTING') %}
                     <a href="{{ url_for('sales') }}" class="px-3 py-2 rounded-lg text-sm font-medium {% if request.path == '/sales' %}bg-sky-600 text-white{% else %}text-slate-300 hover:bg-slate-800 hover:text-white{% endif %} flex items-center gap-1.5 transition">
                         <i data-lucide="receipt" class="w-4 h-4"></i> Sales History
                     </a>

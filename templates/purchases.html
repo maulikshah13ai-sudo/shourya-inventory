@@ -9,11 +9,33 @@
     <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
         <div>
             <h1 class="text-2xl font-bold text-slate-800 tracking-tight">Stock In (Bulk Purchases)</h1>
-            <p class="text-sm text-slate-500">Record factory shipments and supplier consignments to increase your inventory</p>
+            <p class="text-sm text-slate-500">Record factory shipments, upload bulk spreadsheets, and update inventory counts</p>
         </div>
-        <div>
-            <button onclick="document.getElementById('purchaseFormCard').scrollIntoView({behavior: 'smooth'})" class="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-semibold text-sm shadow-sm transition">
-                <i data-lucide="plus" class="w-4 h-4"></i> New Stock In Entry
+        <div class="flex flex-wrap items-center gap-2">
+            <!-- Download Excel Template Dropdown -->
+            <div class="relative inline-block text-left">
+                <button type="button" onclick="toggleDropdown('downloadPurchaseTemplateDropdown')" class="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs transition border border-slate-300">
+                    <i data-lucide="download" class="w-4 h-4 text-emerald-600"></i> Download Excel Template ▾
+                </button>
+                <div id="downloadPurchaseTemplateDropdown" class="hidden absolute right-0 mt-2 w-48 rounded-xl shadow-xl bg-white border border-slate-200 z-50 divide-y divide-slate-100">
+                    <a href="{{ url_for('download_bulk_purchase_template', format='xlsx') }}" class="block px-4 py-2.5 text-xs text-slate-700 hover:bg-slate-50 flex items-center justify-between font-medium">
+                        <span>Excel Spreadsheet</span>
+                        <span class="text-emerald-700 font-bold bg-emerald-50 px-1.5 py-0.5 rounded text-[10px]">.XLSX</span>
+                    </a>
+                    <a href="{{ url_for('download_bulk_purchase_template', format='csv') }}" class="block px-4 py-2.5 text-xs text-slate-700 hover:bg-slate-50 flex items-center justify-between font-medium">
+                        <span>CSV Format</span>
+                        <span class="text-sky-700 font-bold bg-sky-50 px-1.5 py-0.5 rounded text-[10px]">.CSV</span>
+                    </a>
+                </div>
+            </div>
+
+            <!-- Upload Bulk Purchase Excel Button -->
+            <button type="button" onclick="openBulkPurchaseModal()" class="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs shadow-sm transition">
+                <i data-lucide="file-spreadsheet" class="w-4 h-4"></i> Upload Bulk Excel
+            </button>
+
+            <button onclick="document.getElementById('purchaseFormCard').scrollIntoView({behavior: 'smooth'})" class="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-semibold text-xs shadow-sm transition">
+                <i data-lucide="plus" class="w-4 h-4"></i> New Manual Entry
             </button>
         </div>
     </div>
@@ -336,5 +358,124 @@
             lucide.createIcons();
         }
     }
+    function toggleDropdown(id) {
+        const el = document.getElementById(id);
+        el.classList.toggle('hidden');
+    }
+
+    // Close dropdowns when clicking outside
+    window.addEventListener('click', function(e) {
+        if (!e.target.closest('.relative')) {
+            const d = document.getElementById('downloadPurchaseTemplateDropdown');
+            if (d && !d.classList.contains('hidden')) d.classList.add('hidden');
+        }
+    });
+
+    function openBulkPurchaseModal() {
+        document.getElementById('bulkPurchaseModal').classList.remove('hidden');
+        document.getElementById('bulkPurchaseModal').classList.add('flex');
+        document.getElementById('purchaseUploadMsg').classList.add('hidden');
+        document.getElementById('purchaseFile').value = '';
+    }
+
+    function closeBulkPurchaseModal() {
+        document.getElementById('bulkPurchaseModal').classList.add('hidden');
+        document.getElementById('bulkPurchaseModal').classList.remove('flex');
+    }
+
+    async function submitBulkPurchaseExcel() {
+        const fileInput = document.getElementById('purchaseFile');
+        if (!fileInput.files || fileInput.files.length === 0) {
+            alert('Please select an Excel (.xlsx) or CSV file first!');
+            return;
+        }
+
+        const btn = document.getElementById('btnSubmitUpload');
+        btn.disabled = true;
+        btn.innerHTML = `<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> Processing Spreadsheet...`;
+        lucide.createIcons();
+
+        const formData = new FormData();
+        formData.append('file', fileInput.files[0]);
+
+        const msgBox = document.getElementById('purchaseUploadMsg');
+        msgBox.classList.add('hidden');
+
+        try {
+            const res = await fetch('/api/purchases/upload-excel', {
+                method: 'POST',
+                body: formData
+            });
+
+            const data = await res.json();
+            if (data.success) {
+                msgBox.className = "p-3 rounded-xl text-xs font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200 block";
+                msgBox.innerText = data.message;
+                setTimeout(() => {
+                    window.location.reload();
+                }, 1500);
+            } else {
+                msgBox.className = "p-3 rounded-xl text-xs font-semibold bg-rose-50 text-rose-800 border border-rose-200 block";
+                msgBox.innerText = `Error: ${data.message}`;
+                btn.disabled = false;
+                btn.innerHTML = `<i data-lucide="upload" class="w-4 h-4"></i> Upload & Process Excel`;
+                lucide.createIcons();
+            }
+        } catch (e) {
+            msgBox.className = "p-3 rounded-xl text-xs font-semibold bg-rose-50 text-rose-800 border border-rose-200 block";
+            msgBox.innerText = `Network Error: ${e.message}`;
+            btn.disabled = false;
+            btn.innerHTML = `<i data-lucide="upload" class="w-4 h-4"></i> Upload & Process Excel`;
+            lucide.createIcons();
+        }
+    }
 </script>
+
+<!-- Bulk Purchase Upload Modal -->
+<div id="bulkPurchaseModal" class="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs hidden items-center justify-center p-4">
+    <div class="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-100 space-y-4">
+        <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+            <div class="flex items-center gap-2">
+                <div class="w-9 h-9 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold">
+                    <i data-lucide="file-spreadsheet" class="w-5 h-5"></i>
+                </div>
+                <div>
+                    <h3 class="font-bold text-base text-slate-800">Upload Bulk Purchases (Stock In)</h3>
+                    <p class="text-xs text-slate-500">Import bulk shipments directly from Excel (.xlsx) or CSV</p>
+                </div>
+            </div>
+            <button onclick="closeBulkPurchaseModal()" class="text-slate-400 hover:text-slate-600">&times;</button>
+        </div>
+
+        <div id="purchaseUploadMsg" class="hidden"></div>
+
+        <div class="space-y-3">
+            <div class="p-4 rounded-2xl bg-slate-50 border-2 border-dashed border-slate-300 text-center space-y-2 hover:border-indigo-400 transition cursor-pointer" onclick="document.getElementById('purchaseFile').click()">
+                <i data-lucide="upload-cloud" class="w-10 h-10 text-slate-400 mx-auto"></i>
+                <p class="text-xs font-bold text-slate-700">Click to select or drag & drop Excel / CSV file</p>
+                <p class="text-[11px] text-slate-400">Supports .xlsx and .csv files created with our template</p>
+                <input type="file" id="purchaseFile" accept=".xlsx, .csv" class="hidden" onchange="document.getElementById('selectedFileName').innerText = this.files[0]?.name || ''">
+                <div id="selectedFileName" class="text-xs font-mono font-bold text-indigo-600"></div>
+            </div>
+
+            <div class="p-3 bg-sky-50 rounded-xl text-xs text-sky-800 border border-sky-200 space-y-1">
+                <span class="font-bold block flex items-center gap-1">
+                    <i data-lucide="info" class="w-3.5 h-3.5"></i> Need the format?
+                </span>
+                <p class="text-[11px] text-sky-700">
+                    Download our ready-to-use template:
+                    <a href="{{ url_for('download_bulk_purchase_template', format='xlsx') }}" class="font-bold text-sky-900 underline ml-1">Download Excel (.xlsx)</a> or
+                    <a href="{{ url_for('download_bulk_purchase_template', format='csv') }}" class="font-bold text-sky-900 underline ml-1">Download CSV</a>
+                </p>
+            </div>
+        </div>
+
+        <div class="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+            <button type="button" onclick="closeBulkPurchaseModal()" class="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100">Cancel</button>
+            <button type="button" id="btnSubmitUpload" onclick="submitBulkPurchaseExcel()" class="px-5 py-2.5 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm flex items-center gap-1.5 transition">
+                <i data-lucide="upload" class="w-4 h-4"></i> Upload & Process Excel
+            </button>
+        </div>
+    </div>
+</div>
 {% endblock %}

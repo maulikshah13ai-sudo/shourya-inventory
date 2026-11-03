@@ -7,6 +7,7 @@ from datetime import datetime, date
 from flask import Flask, render_template, request, jsonify, redirect, url_for, send_file, flash, session
 from werkzeug.security import check_password_hash, generate_password_hash
 from database import get_connection, init_db, get_next_invoice_number
+import excel_helpers
 
 app = Flask(__name__)
 # Secure session key
@@ -63,11 +64,20 @@ def get_current_user():
 
 @app.context_processor
 def inject_global_data():
+    pending_est = 0
+    try:
+        conn = get_connection()
+        pending_est = conn.execute("SELECT COUNT(*) FROM estimates WHERE status = 'BOOKED'").fetchone()[0]
+        conn.close()
+    except Exception:
+        pass
+
     return {
         'settings': get_settings(),
         'current_user': get_current_user(),
         'local_ip': get_local_ip(),
-        'now': datetime.now()
+        'now': datetime.now(),
+        'pending_estimates_count': pending_est
     }
 
 # ----------------- AUTHENTICATION DECORATORS -----------------
@@ -627,6 +637,132 @@ def create_purchase():
     finally:
         conn.close()
 
+@app.route('/export/template/bulk-purchase')
+@login_required
+@role_required(['ADMIN', 'WAREHOUSE'])
+def download_bulk_purchase_template():
+    file_format = request.args.get('format', 'xlsx').lower()
+    file_bytes, filename, mimetype = excel_helpers.generate_bulk_purchase_template(file_format)
+    return send_file(io.BytesIO(file_bytes), mimetype=mimetype, as_attachment=True, download_name=filename)
+
+@app.route('/api/purchases/upload-excel', methods=['POST'])
+@login_required
+@role_required(['ADMIN', 'WAREHOUSE'])
+def upload_bulk_purchases_excel():
+    if 'file' not in request.files:
+        return jsonify({'success': False, 'message': 'No file uploaded.'}), 400
+    file = request.files['file']
+    if not file or not file.filename:
+        return jsonify({'success': False, 'message': 'Please select an Excel (.xlsx) or CSV file.'}), 400
+
+    try:
+        raw_rows = excel_helpers.parse_uploaded_file(file)
+        if not raw_rows:
+            return jsonify({'success': False, 'message': 'Uploaded file has no data rows.'}), 400
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'Error reading file: {str(e)}'}), 400
+
+    conn = get_connection()
+    cur = conn.cursor()
+    try:
+        grouped_purchases = {}
+        for r in raw_rows:
+            item_data = excel_helpers.extract_purchase_row_data(r)
+            if not item_data['sku']:
+                continue
+            sup_name = item_data['supplier_name'] or 'Direct Factory Supplier'
+            inv_no = item_data['invoice_no']
+            group_key = (sup_name, inv_no, item_data['purchase_date'])
+            if group_key not in grouped_purchases:
+                grouped_purchases[group_key] = []
+            grouped_purchases[group_key].append(item_data)
+
+        if not grouped_purchases:
+            conn.close()
+            return jsonify({'success': False, 'message': 'No valid product rows with SKU found in file.'}), 400
+
+        total_invoices_created = 0
+        total_items_processed = 0
+        total_purchase_val = 0.0
+
+        for (sup_name, inv_no, p_date), items in grouped_purchases.items():
+            cur.execute("SELECT id FROM parties WHERE name = ? AND party_type = 'SUPPLIER'", (sup_name,))
+            s_row = cur.fetchone()
+            if s_row:
+                supplier_id = s_row[0]
+            else:
+                cur.execute("INSERT INTO parties (name, party_type) VALUES (?, 'SUPPLIER')", (sup_name,))
+                supplier_id = cur.lastrowid
+
+            final_inv_no = inv_no
+            if not final_inv_no:
+                count = cur.execute("SELECT COUNT(*) FROM purchases").fetchone()[0] + 1
+                final_inv_no = f"PUR-{datetime.now().strftime('%Y%m')}-{count:04d}"
+
+            shipment_total = sum(it['quantity'] * it['cost_price'] for it in items)
+            total_purchase_val += shipment_total
+
+            cur.execute("SELECT id FROM purchases WHERE invoice_no = ?", (final_inv_no,))
+            existing_pur = cur.fetchone()
+            if existing_pur:
+                purchase_id = existing_pur[0]
+                cur.execute("UPDATE purchases SET total_amount = total_amount + ?, paid_amount = paid_amount + ? WHERE id = ?",
+                            (shipment_total, shipment_total, purchase_id))
+            else:
+                cur.execute("""
+                    INSERT INTO purchases (invoice_no, supplier_id, supplier_name, purchase_date, total_amount, paid_amount, payment_status, notes)
+                    VALUES (?, ?, ?, ?, ?, ?, 'PAID', ?)
+                """, (final_inv_no, supplier_id, sup_name, p_date, shipment_total, shipment_total, "Imported via Excel Bulk Upload"))
+                purchase_id = cur.lastrowid
+                total_invoices_created += 1
+
+            for it in items:
+                sku = it['sku']
+                qty = it['quantity']
+                cost = it['cost_price']
+                item_cost_total = qty * cost
+
+                cur.execute("SELECT id, stock_qty FROM products WHERE sku = ?", (sku,))
+                prod_row = cur.fetchone()
+                if prod_row:
+                    prod_id = prod_row['id']
+                    new_stock = prod_row['stock_qty'] + qty
+                    cur.execute("""
+                        UPDATE products 
+                        SET stock_qty = ?, cost_price = ?, wholesale_price = COALESCE(NULLIF(?, 0), wholesale_price),
+                            retail_price = COALESCE(NULLIF(?, 0), retail_price), updated_at = CURRENT_TIMESTAMP
+                        WHERE id = ?
+                    """, (new_stock, cost, it['wholesale_price'], it['retail_price'], prod_id))
+                else:
+                    cur.execute("""
+                        INSERT INTO products (sku, name, category, subcategory, brand, size, color, unit, cost_price, wholesale_price, retail_price, stock_qty, min_alert_qty, location, notes)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 5, ?, ?)
+                    """, (sku, it['name'], it['category'], it['subcategory'], it['brand'], it['size'], it['color'], it['unit'], cost, it['wholesale_price'], it['retail_price'], qty, it['location'], it['notes']))
+                    prod_id = cur.lastrowid
+                    new_stock = qty
+
+                cur.execute("""
+                    INSERT INTO purchase_items (purchase_id, product_id, quantity, unit_cost, total_cost)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (purchase_id, prod_id, qty, cost, item_cost_total))
+
+                cur.execute("""
+                    INSERT INTO stock_logs (product_id, change_type, quantity_change, stock_after, reference_no, reason)
+                    VALUES (?, 'PURCHASE_IN', ?, ?, ?, ?)
+                """, (prod_id, qty, new_stock, final_inv_no, f"Bulk Excel Purchase from {sup_name}"))
+                total_items_processed += 1
+
+        conn.commit()
+        conn.close()
+        return jsonify({
+            'success': True,
+            'message': f'Bulk Purchase Upload Successful! Processed {total_items_processed} items across {total_invoices_created} supplier invoices. Total: ₹{total_purchase_val:,.2f}'
+        })
+    except Exception as e:
+        conn.rollback()
+        conn.close()
+        return jsonify({'success': False, 'message': f'Error during bulk purchase upload: {str(e)}'}), 500
+
 # ----------------- SALES HISTORY & INVOICES -----------------
 @app.route('/sales')
 @login_required
@@ -688,6 +824,428 @@ def print_invoice(sale_id):
 
     conn.close()
     return render_template('invoice_print.html', sale=dict(sale), items=items, party=party)
+
+@app.route('/export/template/bulk-sale')
+@login_required
+@role_required(['ADMIN', 'SALESMAN', 'ACCOUNTING'])
+def download_bulk_sale_template():
+    file_format = request.args.get('format', 'xlsx').lower()
+    file_bytes, filename, mimetype = excel_helpers.generate_bulk_sale_template(file_format)
+    return send_file(io.BytesIO(file_bytes), mimetype=mimetype, as_attachment=True, download_name=filename)
+
+@app.route('/api/sales/upload-excel', methods=['POST'])
+@login_required
+@role_required(['ADMIN', 'SALESMAN', 'ACCOUNTING'])
+def upload_bulk_sales_excel():
+    if 'file' not in request.files:
+        return jsonify({'success': False, 'message': 'No file uploaded.'}), 400
+    file = request.files['file']
+    if not file or not file.filename:
+        return jsonify({'success': False, 'message': 'Please select an Excel (.xlsx) or CSV file.'}), 400
+
+    try:
+        raw_rows = excel_helpers.parse_uploaded_file(file)
+        if not raw_rows:
+            return jsonify({'success': False, 'message': 'Uploaded file contains no data rows.'}), 400
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'Error reading file: {str(e)}'}), 400
+
+    conn = get_connection()
+    cur = conn.cursor()
+    try:
+        grouped_sales = {}
+        for idx, r in enumerate(raw_rows):
+            item_data = excel_helpers.extract_sale_row_data(r)
+            if not item_data['sku']:
+                continue
+
+            cur.execute("SELECT id, name, sku, size, color, unit, stock_qty, wholesale_price, retail_price, cost_price FROM products WHERE sku = ?", (item_data['sku'],))
+            prod = cur.fetchone()
+            if not prod:
+                conn.close()
+                return jsonify({'success': False, 'message': f'Row {idx + 2}: SKU "{item_data["sku"]}" does not exist in inventory catalog! Please add it first or check spelling.'}), 400
+
+            item_data['product'] = dict(prod)
+            if item_data['unit_price'] <= 0:
+                item_data['unit_price'] = prod['wholesale_price'] if item_data['sale_type'] == 'WHOLESALE' else prod['retail_price']
+
+            ref = item_data['order_ref'] or f"ROW_{idx}"
+            grp_key = (item_data['customer_name'], item_data['customer_phone'], item_data['sale_type'], item_data['payment_mode'], ref)
+            if grp_key not in grouped_sales:
+                grouped_sales[grp_key] = []
+            grouped_sales[grp_key].append(item_data)
+
+        if not grouped_sales:
+            conn.close()
+            return jsonify({'success': False, 'message': 'No valid sale items found in file.'}), 400
+
+        # Check stock availability for all items
+        for grp_key, items in grouped_sales.items():
+            for it in items:
+                prod = it['product']
+                if it['quantity'] > prod['stock_qty']:
+                    conn.close()
+                    return jsonify({
+                        'success': False,
+                        'message': f'Insufficient stock for SKU {prod["sku"]} ({prod["name"]})! Requested: {it["quantity"]}, Available: {prod["stock_qty"]}.'
+                    }), 400
+
+        settings_data = get_settings()
+        prefix = settings_data.get('invoice_prefix', 'SSIPL').strip() or 'SSIPL'
+        salesman_id = session.get('user_id')
+        salesman_name = session.get('full_name') or session.get('username') or 'Sales Staff'
+
+        total_invoices_created = 0
+        total_sales_value = 0.0
+
+        for (cust_name, cust_phone, sale_type, pay_mode, ref), items in grouped_sales.items():
+            subtotal = sum(it['quantity'] * it['unit_price'] for it in items)
+            total_discount = sum(it['discount'] for it in items)
+            grand_total = max(0.0, subtotal - total_discount)
+            total_sales_value += grand_total
+
+            specified_paid = [it['paid_amount'] for it in items if it['paid_amount'] is not None]
+            if specified_paid:
+                paid_amount = sum(specified_paid)
+            else:
+                paid_amount = 0.0 if pay_mode == 'CREDIT' else grand_total
+
+            balance_amount = max(0.0, grand_total - paid_amount)
+            payment_status = 'PAID' if balance_amount == 0 else ('PARTIAL' if paid_amount > 0 else 'CREDIT')
+
+            party_id = None
+            if sale_type == 'WHOLESALE' or cust_name != 'Walk-in Customer':
+                cur.execute("SELECT id FROM parties WHERE name = ? AND party_type = 'WHOLESALE_BUYER'", (cust_name,))
+                p_row = cur.fetchone()
+                if p_row:
+                    party_id = p_row[0]
+                else:
+                    cur.execute("INSERT INTO parties (name, phone, party_type, current_balance) VALUES (?, ?, 'WHOLESALE_BUYER', 0.0)", (cust_name, cust_phone))
+                    party_id = cur.lastrowid
+
+            invoice_no = get_next_invoice_number(conn, prefix=prefix)
+            notes = f"Bulk Excel Import (Ref: {ref})"
+
+            cur.execute("""
+                INSERT INTO sales (invoice_no, sale_type, party_id, customer_name, customer_phone, 
+                                   subtotal, discount, grand_total, payment_mode, payment_status, 
+                                   paid_amount, balance_amount, notes, salesman_id, salesman_name)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (invoice_no, sale_type, party_id, cust_name, cust_phone, subtotal, total_discount, grand_total,
+                  pay_mode, payment_status, paid_amount, balance_amount, notes, salesman_id, salesman_name))
+            sale_id = cur.lastrowid
+            total_invoices_created += 1
+
+            for it in items:
+                prod = it['product']
+                prod_id = prod['id']
+                qty = it['quantity']
+                price = it['unit_price']
+                cost = prod['cost_price']
+                item_total = qty * price
+
+                new_stock = prod['stock_qty'] - qty
+                cur.execute("UPDATE products SET stock_qty = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (new_stock, prod_id))
+                prod['stock_qty'] = new_stock
+
+                cur.execute("""
+                    INSERT INTO sale_items (sale_id, product_id, product_name, sku, size, color, unit, quantity, unit_price, cost_price, total_price)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (sale_id, prod_id, prod['name'], prod['sku'], prod['size'], prod['color'], prod['unit'], qty, price, cost, item_total))
+
+                cur.execute("""
+                    INSERT INTO stock_logs (product_id, change_type, quantity_change, stock_after, reference_no, reason)
+                    VALUES (?, 'SALE_OUT', ?, ?, ?, ?)
+                """, (prod_id, -qty, new_stock, invoice_no, f"Bulk Excel Sale to {cust_name}"))
+
+            if party_id and balance_amount > 0:
+                cur.execute("UPDATE parties SET current_balance = current_balance + ? WHERE id = ?", (balance_amount, party_id))
+
+        conn.commit()
+        conn.close()
+        return jsonify({
+            'success': True,
+            'message': f'Bulk Sales Upload Successful! Created {total_invoices_created} invoices for total ₹{total_sales_value:,.2f}. Stock deducted.'
+        })
+    except Exception as e:
+        conn.rollback()
+        conn.close()
+        return jsonify({'success': False, 'message': f'Error during bulk sales upload: {str(e)}'}), 500
+
+# ----------------- ESTIMATES / SALES ORDERS (ADVANCE BOOKING & LATER DISPATCH) -----------------
+@app.route('/estimates')
+@login_required
+@role_required(['ADMIN', 'SALESMAN', 'ACCOUNTING'])
+def estimates():
+    status_filter = request.args.get('status', '').strip().upper()
+    search = request.args.get('search', '').strip()
+
+    conn = get_connection()
+    cur = conn.cursor()
+
+    query = "SELECT * FROM estimates WHERE 1=1"
+    params = []
+    if status_filter:
+        query += " AND status = ?"
+        params.append(status_filter)
+    if search:
+        query += " AND (estimate_no LIKE ? OR customer_name LIKE ? OR customer_phone LIKE ?)"
+        term = f"%{search}%"
+        params.extend([term, term, term])
+
+    query += " ORDER BY id DESC"
+    cur.execute(query, params)
+    estimates_list = [dict(r) for r in cur.fetchall()]
+
+    # Summary Stats
+    cur.execute("SELECT COUNT(*), COALESCE(SUM(advance_amount), 0), COALESCE(SUM(balance_amount), 0) FROM estimates WHERE status = 'BOOKED'")
+    stats_row = cur.fetchone()
+    active_count = stats_row[0] or 0
+    total_advance = stats_row[1] or 0.0
+    pending_balance = stats_row[2] or 0.0
+
+    cur.execute("SELECT * FROM products WHERE stock_qty > 0 ORDER BY name ASC")
+    products = [dict(r) for r in cur.fetchall()]
+
+    cur.execute("SELECT * FROM parties WHERE party_type = 'WHOLESALE_BUYER' ORDER BY name ASC")
+    parties = [dict(r) for r in cur.fetchall()]
+
+    conn.close()
+    return render_template('estimates.html',
+                           estimates=estimates_list,
+                           active_count=active_count,
+                           total_advance=total_advance,
+                           pending_balance=pending_balance,
+                           products=products,
+                           parties=parties,
+                           status_filter=status_filter,
+                           search=search)
+
+@app.route('/api/estimates/create', methods=['POST'])
+@login_required
+@role_required(['ADMIN', 'SALESMAN', 'ACCOUNTING'])
+def create_estimate():
+    data = request.get_json()
+    if not data or not data.get('items'):
+        return jsonify({'success': False, 'message': 'No items specified in booking order'}), 400
+
+    conn = get_connection()
+    cur = conn.cursor()
+    try:
+        customer_name = data.get('customer_name', '').strip() or 'Walk-in Customer'
+        customer_phone = data.get('customer_phone', '').strip()
+        party_id = data.get('party_id') or None
+        order_type = data.get('order_type', 'WHOLESALE').upper()
+        subtotal = float(data.get('subtotal', 0.0))
+        discount = float(data.get('discount', 0.0))
+        grand_total = float(data.get('grand_total', 0.0))
+        advance_amount = float(data.get('advance_amount', 0.0))
+        advance_payment_mode = data.get('advance_payment_mode', 'CASH').upper()
+        expected_dispatch_date = data.get('expected_dispatch_date') or None
+        notes = data.get('notes', '').strip()
+
+        balance_amount = max(0.0, grand_total - advance_amount)
+        salesman_id = session.get('user_id')
+        salesman_name = session.get('full_name') or session.get('username') or 'Staff'
+
+        estimate_no = get_next_invoice_number(conn, prefix='EST')
+
+        cur.execute("""
+            INSERT INTO estimates (estimate_no, party_id, customer_name, customer_phone, order_type,
+                                   subtotal, discount, grand_total, advance_amount, advance_payment_mode,
+                                   balance_amount, status, expected_dispatch_date, salesman_id, salesman_name, notes)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'BOOKED', ?, ?, ?, ?)
+        """, (estimate_no, party_id, customer_name, customer_phone, order_type,
+              subtotal, discount, grand_total, advance_amount, advance_payment_mode,
+              balance_amount, expected_dispatch_date, salesman_id, salesman_name, notes))
+        estimate_id = cur.lastrowid
+
+        for item in data['items']:
+            prod_id = item['id']
+            qty = int(item['quantity'])
+            price = float(item['price'])
+            item_total = qty * price
+
+            cur.execute("SELECT name, sku, size, color, unit FROM products WHERE id = ?", (prod_id,))
+            prod = cur.fetchone()
+            if not prod:
+                raise Exception(f"Product ID {prod_id} not found!")
+
+            cur.execute("""
+                INSERT INTO estimate_items (estimate_id, product_id, product_name, sku, size, color, unit, quantity, unit_price, total_price)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (estimate_id, prod_id, prod['name'], prod['sku'], prod['size'], prod['color'], prod['unit'], qty, price, item_total))
+
+        conn.commit()
+        return jsonify({
+            'success': True,
+            'estimate_id': estimate_id,
+            'estimate_no': estimate_no,
+            'message': f'Advance Booking {estimate_no} created successfully!'
+        })
+    except Exception as e:
+        conn.rollback()
+        return jsonify({'success': False, 'message': str(e)}), 500
+    finally:
+        conn.close()
+
+@app.route('/estimate/<int:estimate_id>/print')
+@login_required
+def print_estimate(estimate_id):
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM estimates WHERE id = ?", (estimate_id,))
+    est = cur.fetchone()
+    if not est:
+        conn.close()
+        return "Estimate / Booking Order not found", 404
+
+    cur.execute("SELECT * FROM estimate_items WHERE estimate_id = ?", (estimate_id,))
+    items = [dict(r) for r in cur.fetchall()]
+
+    party = None
+    if est['party_id']:
+        cur.execute("SELECT * FROM parties WHERE id = ?", (est['party_id'],))
+        p_row = cur.fetchone()
+        if p_row:
+            party = dict(p_row)
+
+    conn.close()
+    return render_template('estimate_print.html', estimate=dict(est), items=items, party=party)
+
+@app.route('/api/estimates/<int:estimate_id>/dispatch', methods=['POST'])
+@login_required
+@role_required(['ADMIN', 'SALESMAN', 'ACCOUNTING'])
+def dispatch_estimate(estimate_id):
+    data = request.get_json() or {}
+    additional_paid = float(data.get('additional_paid_amount', 0.0))
+    dispatch_payment_mode = data.get('dispatch_payment_mode', 'CASH').upper()
+
+    conn = get_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT * FROM estimates WHERE id = ?", (estimate_id,))
+        est = cur.fetchone()
+        if not est:
+            conn.close()
+            return jsonify({'success': False, 'message': 'Estimate not found'}), 404
+
+        if est['status'] != 'BOOKED':
+            conn.close()
+            return jsonify({'success': False, 'message': f'Order is already {est["status"]}. Cannot dispatch.'}), 400
+
+        cur.execute("SELECT * FROM estimate_items WHERE estimate_id = ?", (estimate_id,))
+        items = [dict(r) for r in cur.fetchall()]
+
+        # Verify physical stock
+        for it in items:
+            cur.execute("SELECT stock_qty, name, sku FROM products WHERE id = ?", (it['product_id'],))
+            p = cur.fetchone()
+            if not p:
+                conn.close()
+                return jsonify({'success': False, 'message': f'Product {it["product_name"]} no longer exists!'}), 400
+            if p['stock_qty'] < it['quantity']:
+                conn.close()
+                return jsonify({'success': False, 'message': f'Not enough stock to dispatch {p["name"]}! Required: {it["quantity"]}, Available: {p["stock_qty"]}.'}), 400
+
+        settings_data = get_settings()
+        prefix = settings_data.get('invoice_prefix', 'SSIPL').strip() or 'SSIPL'
+        invoice_no = get_next_invoice_number(conn, prefix=prefix)
+
+        advance_amount = float(est['advance_amount'])
+        grand_total = float(est['grand_total'])
+        total_paid = min(grand_total, advance_amount + additional_paid)
+        final_balance = max(0.0, grand_total - total_paid)
+        payment_status = 'PAID' if final_balance == 0 else ('PARTIAL' if total_paid > 0 else 'CREDIT')
+
+        salesman_id = session.get('user_id')
+        salesman_name = session.get('full_name') or session.get('username') or est['salesman_name']
+        notes = f"Dispatched against Advance Booking {est['estimate_no']}"
+        if est['notes']:
+            notes += f" | {est['notes']}"
+
+        # Insert Sale
+        cur.execute("""
+            INSERT INTO sales (invoice_no, sale_type, party_id, customer_name, customer_phone, 
+                               subtotal, discount, grand_total, payment_mode, payment_status, 
+                               paid_amount, balance_amount, notes, salesman_id, salesman_name,
+                               estimate_id, advance_adjusted)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (invoice_no, est['order_type'], est['party_id'], est['customer_name'], est['customer_phone'],
+              est['subtotal'], est['discount'], grand_total, dispatch_payment_mode, payment_status,
+              total_paid, final_balance, notes, salesman_id, salesman_name,
+              estimate_id, advance_amount))
+        sale_id = cur.lastrowid
+
+        # Deduct physical stock and insert sale items
+        for it in items:
+            prod_id = it['product_id']
+            qty = it['quantity']
+            price = it['unit_price']
+
+            cur.execute("SELECT stock_qty, cost_price FROM products WHERE id = ?", (prod_id,))
+            prod = cur.fetchone()
+            cost_price = prod['cost_price']
+            new_stock = prod['stock_qty'] - qty
+
+            cur.execute("UPDATE products SET stock_qty = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (new_stock, prod_id))
+
+            cur.execute("""
+                INSERT INTO sale_items (sale_id, product_id, product_name, sku, size, color, unit, quantity, unit_price, cost_price, total_price)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (sale_id, prod_id, it['product_name'], it['sku'], it['size'], it['color'], it['unit'], qty, price, cost_price, qty * price))
+
+            cur.execute("""
+                INSERT INTO stock_logs (product_id, change_type, quantity_change, stock_after, reference_no, reason)
+                VALUES (?, 'SALE_OUT', ?, ?, ?, ?)
+            """, (prod_id, -qty, new_stock, invoice_no, f"Dispatched from Order {est['estimate_no']}"))
+
+        # Wholesale ledger balance update
+        if est['party_id'] and final_balance > 0:
+            cur.execute("UPDATE parties SET current_balance = current_balance + ? WHERE id = ?", (final_balance, est['party_id']))
+
+        # Update estimate status
+        cur.execute("""
+            UPDATE estimates 
+            SET status = 'DISPATCHED', converted_invoice_id = ?, converted_invoice_no = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        """, (sale_id, invoice_no, estimate_id))
+
+        conn.commit()
+        return jsonify({
+            'success': True,
+            'invoice_id': sale_id,
+            'invoice_no': invoice_no,
+            'message': f"Order {est['estimate_no']} successfully dispatched! Final Tax Invoice #{invoice_no} generated."
+        })
+    except Exception as e:
+        conn.rollback()
+        return jsonify({'success': False, 'message': str(e)}), 500
+    finally:
+        conn.close()
+
+@app.route('/api/estimates/<int:estimate_id>/cancel', methods=['POST'])
+@login_required
+@role_required(['ADMIN', 'SALESMAN', 'ACCOUNTING'])
+def cancel_estimate(estimate_id):
+    conn = get_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT status FROM estimates WHERE id = ?", (estimate_id,))
+        row = cur.fetchone()
+        if not row:
+            return jsonify({'success': False, 'message': 'Estimate not found'}), 404
+        if row['status'] != 'BOOKED':
+            return jsonify({'success': False, 'message': f'Cannot cancel order with status {row["status"]}'}), 400
+
+        cur.execute("UPDATE estimates SET status = 'CANCELLED', updated_at = CURRENT_TIMESTAMP WHERE id = ?", (estimate_id,))
+        conn.commit()
+        return jsonify({'success': True, 'message': 'Advance Booking / Estimate cancelled.'})
+    except Exception as e:
+        conn.rollback()
+        return jsonify({'success': False, 'message': str(e)}), 500
+    finally:
+        conn.close()
 
 # ----------------- WHOLESALE PARTY LEDGER / KHATA -----------------
 @app.route('/ledger')

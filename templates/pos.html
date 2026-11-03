@@ -191,12 +191,19 @@
                     </div>
                 </div>
 
-                <!-- Complete Sale Button -->
-                <button type="button" id="btnSubmitSale" onclick="processSale()"
-                        class="w-full py-3.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-sm tracking-wide shadow-lg shadow-emerald-600/30 flex items-center justify-center gap-2 transition disabled:opacity-50">
-                    <i data-lucide="check-circle" class="w-5 h-5"></i>
-                    COMPLETE SALE & PRINT BILL
-                </button>
+                <!-- Complete Sale & Advance Booking Buttons -->
+                <div class="space-y-2">
+                    <button type="button" id="btnSubmitSale" onclick="processSale()"
+                            class="w-full py-3.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-sm tracking-wide shadow-lg shadow-emerald-600/30 flex items-center justify-center gap-2 transition disabled:opacity-50">
+                        <i data-lucide="check-circle" class="w-5 h-5"></i>
+                        COMPLETE SALE & PRINT BILL
+                    </button>
+                    <button type="button" onclick="bookAsEstimateFromPOS()"
+                            class="w-full py-2.5 px-4 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold text-xs tracking-wide border border-indigo-200 flex items-center justify-center gap-1.5 transition">
+                        <i data-lucide="clipboard-pen" class="w-4 h-4"></i>
+                        Book as Advance Order (Estimate)
+                    </button>
+                </div>
             </div>
 
         </div>
@@ -525,6 +532,56 @@
             btnSubmit.disabled = false;
             btnSubmit.innerHTML = `<i data-lucide="check-circle" class="w-5 h-5"></i> COMPLETE SALE & PRINT BILL`;
             lucide.createIcons();
+        }
+    }
+
+    async function bookAsEstimateFromPOS() {
+        if (cart.length === 0) {
+            alert('Please add items to the cart first before booking!');
+            return;
+        }
+
+        const customerName = document.getElementById('custName').value.trim() || 'Walk-in Customer';
+        const customerPhone = document.getElementById('custPhone').value.trim();
+        const partyId = document.getElementById('partySelect').value || null;
+        const discount = parseFloat(document.getElementById('inputDiscount').value) || 0;
+        let subtotal = 0;
+        cart.forEach(i => subtotal += i.quantity * i.price);
+        const grandTotal = Math.max(0, subtotal - discount);
+
+        const promptVal = prompt(`Total Booking Amount: ${CURRENCY}${grandTotal.toFixed(2)}\n\nEnter Advance Token Amount received today (e.g. 2000):`, "0");
+        if (promptVal === null) return;
+        const advanceAmount = parseFloat(promptVal) || 0;
+        const advanceMode = document.getElementById('paymentMode').value;
+
+        try {
+            const res = await fetch('/api/estimates/create', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    customer_name: customerName,
+                    customer_phone: customerPhone,
+                    party_id: partyId,
+                    order_type: currentMode,
+                    subtotal: subtotal,
+                    discount: discount,
+                    grand_total: grandTotal,
+                    advance_amount: advanceAmount,
+                    advance_payment_mode: advanceMode,
+                    items: cart
+                })
+            });
+            const data = await res.json();
+            if (data.success) {
+                alert(`Order Booked! Ref #${data.estimate_no}`);
+                window.open(`/estimate/${data.estimate_id}/print`, '_blank');
+                cart = [];
+                renderCart();
+            } else {
+                alert(`Error: ${data.message}`);
+            }
+        } catch (e) {
+            alert(`Error: ${e.message}`);
         }
     }
 </script>

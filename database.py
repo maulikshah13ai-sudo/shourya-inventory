@@ -74,6 +74,14 @@ def init_db():
         cursor.execute("ALTER TABLE sales ADD COLUMN salesman_name TEXT DEFAULT 'Staff'")
     except sqlite3.OperationalError:
         pass
+    try:
+        cursor.execute("ALTER TABLE sales ADD COLUMN estimate_id INTEGER")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        cursor.execute("ALTER TABLE sales ADD COLUMN advance_adjusted REAL DEFAULT 0.0")
+    except sqlite3.OperationalError:
+        pass
 
     # Ensure shop name is updated to SSIPL
     cursor.execute("UPDATE settings SET shop_name = 'SSIPL Bags & Footwear Hub' WHERE shop_name = 'Apex Footwear & Bags Hub'")
@@ -219,7 +227,55 @@ def init_db():
     );
     """)
 
-    # 9. Invoice Sequences Table for Concurrency-Safe Bill Numbering across multiple salesmen
+    # 9. Estimates / Sales Orders (Advance Booking with Later Dispatch & Billing)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS estimates (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        estimate_no TEXT UNIQUE NOT NULL,       -- e.g. 'EST-2026-0001'
+        party_id INTEGER,
+        customer_name TEXT NOT NULL,
+        customer_phone TEXT,
+        order_type TEXT NOT NULL DEFAULT 'WHOLESALE', -- 'WHOLESALE' or 'RETAIL'
+        subtotal REAL NOT NULL,
+        discount REAL DEFAULT 0.0,
+        grand_total REAL NOT NULL,
+        advance_amount REAL DEFAULT 0.0,
+        advance_payment_mode TEXT DEFAULT 'CASH', -- 'CASH', 'UPI', 'BANK_TRANSFER', 'CHEQUE'
+        balance_amount REAL DEFAULT 0.0,
+        status TEXT NOT NULL DEFAULT 'BOOKED', -- 'BOOKED', 'DISPATCHED', 'CANCELLED'
+        expected_dispatch_date DATE,
+        converted_invoice_id INTEGER,          -- References sales(id) when dispatched
+        converted_invoice_no TEXT,             -- Official invoice number
+        salesman_id INTEGER,
+        salesman_name TEXT DEFAULT 'Staff',
+        notes TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (party_id) REFERENCES parties(id) ON DELETE SET NULL,
+        FOREIGN KEY (converted_invoice_id) REFERENCES sales(id) ON DELETE SET NULL
+    );
+    """)
+
+    # 10. Estimate Items
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS estimate_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        estimate_id INTEGER NOT NULL,
+        product_id INTEGER NOT NULL,
+        product_name TEXT NOT NULL,
+        sku TEXT,
+        size TEXT,
+        color TEXT,
+        unit TEXT,
+        quantity INTEGER NOT NULL,
+        unit_price REAL NOT NULL,
+        total_price REAL NOT NULL,
+        FOREIGN KEY (estimate_id) REFERENCES estimates(id) ON DELETE CASCADE,
+        FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE RESTRICT
+    );
+    """)
+
+    # 11. Invoice Sequences Table for Concurrency-Safe Bill Numbering across multiple salesmen
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS invoice_sequences (
         sequence_key TEXT PRIMARY KEY,

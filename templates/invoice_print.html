@@ -141,8 +141,14 @@
                     <span>Grand Total:</span>
                     <span class="text-base text-emerald-700">{{ settings.currency_symbol }}{{ "{:,.2f}".format(sale.grand_total) }}</span>
                 </div>
+                {% if sale.advance_adjusted and sale.advance_adjusted > 0 %}
+                <div class="flex justify-between text-indigo-700 font-bold bg-indigo-50 p-1.5 rounded text-[11px]">
+                    <span>Less Advance Adjusted:</span>
+                    <span>-{{ settings.currency_symbol }}{{ "{:,.2f}".format(sale.advance_adjusted) }}</span>
+                </div>
+                {% endif %}
                 <div class="flex justify-between text-slate-700 font-semibold pt-1 border-t border-dashed border-slate-200">
-                    <span>Amount Paid:</span>
+                    <span>Total Amount Paid:</span>
                     <span>{{ settings.currency_symbol }}{{ "{:,.2f}".format(sale.paid_amount) }}</span>
                 </div>
                 {% if sale.balance_amount > 0 %}
