@@ -469,13 +469,14 @@ def create_sale():
         sale_type = data.get('sale_type', 'RETAIL').upper()
         customer_name = data.get('customer_name', 'Walk-in Customer').strip() or 'Walk-in Customer'
         customer_phone = data.get('customer_phone', '').strip()
+        customer_gst = str(data.get('customer_gst', '')).strip().upper()
         party_id = data.get('party_id') or None
         payment_mode = data.get('payment_mode', 'CASH').upper()
         notes = data.get('notes', '')
 
         # Determine Interstate (IGST) vs Intra-State (CGST + SGST)
         is_interstate = int(data.get('is_interstate', 0))
-        cur.execute("SELECT state_code FROM settings LIMIT 1")
+        cur.execute("SELECT state_code, state_name FROM settings LIMIT 1")
         s_row = cur.fetchone()
         shop_sc = (s_row['state_code'] if s_row and s_row['state_code'] else '27').strip()
 
@@ -483,11 +484,19 @@ def create_sale():
             cur.execute("SELECT state_code, gst_no FROM parties WHERE id = ?", (party_id,))
             p_row = cur.fetchone()
             if p_row:
+                if customer_gst and (not p_row['gst_no'] or len(p_row['gst_no'].strip()) == 0):
+                    cur.execute("UPDATE parties SET gst_no = ? WHERE id = ?", (customer_gst, party_id))
+                elif not customer_gst and p_row['gst_no']:
+                    customer_gst = p_row['gst_no'].strip().upper()
+
                 party_sc = (p_row['state_code'] or '').strip()
-                if not party_sc and p_row['gst_no'] and len(p_row['gst_no'].strip()) >= 2:
-                    party_sc = p_row['gst_no'].strip()[:2]
+                if not party_sc and customer_gst and len(customer_gst) >= 2:
+                    party_sc = customer_gst[:2]
                 if party_sc and party_sc != shop_sc:
                     is_interstate = 1
+        elif customer_gst and len(customer_gst) >= 2:
+            if customer_gst[:2] != shop_sc:
+                is_interstate = 1
 
         # Enrich line items with catalog HSN and GST rate
         enriched_items = []
@@ -564,12 +573,12 @@ def create_sale():
 
         # Insert Sale record with full GST compliance breakdown
         cur.execute("""
-            INSERT INTO sales (invoice_no, sale_type, party_id, customer_name, customer_phone, 
+            INSERT INTO sales (invoice_no, sale_type, party_id, customer_name, customer_phone, customer_gst,
                                subtotal, discount, grand_total, payment_mode, payment_status, 
                                paid_amount, balance_amount, notes, salesman_id, salesman_name,
                                taxable_amount, cgst_amount, sgst_amount, igst_amount, total_tax, is_interstate)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (invoice_no, sale_type, party_id, customer_name, customer_phone,
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (invoice_no, sale_type, party_id, customer_name, customer_phone, customer_gst,
               subtotal, discount, grand_total, payment_mode, payment_status,
               paid_amount, balance_amount, notes, salesman_id, salesman_name,
               taxable_amount, cgst_amount, sgst_amount, igst_amount, total_tax, is_interstate))
@@ -600,11 +609,13 @@ def create_sale():
 
         if party_id and balance_amount > 0:
             cur.execute("UPDATE parties SET current_balance = current_balance + ? WHERE id = ?", (balance_amount, party_id))
-        elif not party_id and balance_amount > 0 and customer_name != 'Walk-in Customer':
+        elif not party_id and (balance_amount > 0 or customer_gst) and customer_name != 'Walk-in Customer':
+            p_state = customer_gst[:2] if len(customer_gst) >= 2 else shop_sc
+            p_statename = excel_helpers.GST_STATE_CODES.get(p_state, 'Maharashtra')
             cur.execute("""
-                INSERT INTO parties (name, phone, party_type, current_balance)
-                VALUES (?, ?, 'WHOLESALE_BUYER', ?)
-            """, (customer_name, customer_phone, balance_amount))
+                INSERT INTO parties (name, phone, party_type, gst_no, state_code, state_name, current_balance)
+                VALUES (?, ?, 'WHOLESALE_BUYER', ?, ?, ?, ?)
+            """, (customer_name, customer_phone, customer_gst, p_state, p_statename, balance_amount))
             new_party_id = cur.lastrowid
             cur.execute("UPDATE sales SET party_id = ? WHERE id = ?", (new_party_id, sale_id))
 
@@ -912,24 +923,29 @@ def sales():
     conn = get_connection()
     cur = conn.cursor()
 
-    query = "SELECT * FROM sales WHERE 1=1"
+    query = """
+        SELECT s.*, COALESCE(NULLIF(s.customer_gst, ''), p.gst_no) as gst_no, p.name as party_firm_name
+        FROM sales s
+        LEFT JOIN parties p ON s.party_id = p.id
+        WHERE 1=1
+    """
     params = []
 
     if sale_type:
-        query += " AND sale_type = ?"
+        query += " AND s.sale_type = ?"
         params.append(sale_type)
     if start_date:
-        query += " AND DATE(created_at) >= ?"
+        query += " AND DATE(s.created_at) >= ?"
         params.append(start_date)
     if end_date:
-        query += " AND DATE(created_at) <= ?"
+        query += " AND DATE(s.created_at) <= ?"
         params.append(end_date)
     if search:
-        query += " AND (invoice_no LIKE ? OR customer_name LIKE ? OR customer_phone LIKE ?)"
+        query += " AND (s.invoice_no LIKE ? OR s.customer_name LIKE ? OR s.customer_phone LIKE ? OR s.customer_gst LIKE ? OR p.gst_no LIKE ?)"
         term = f"%{search}%"
-        params.extend([term, term, term])
+        params.extend([term, term, term, term, term])
 
-    query += " ORDER BY id DESC"
+    query += " ORDER BY s.id DESC"
     cur.execute(query, params)
     sales_list = [dict(r) for r in cur.fetchall()]
 
@@ -957,6 +973,21 @@ def print_invoice(sale_id):
         party_row = cur.fetchone()
         if party_row:
             party = dict(party_row)
+
+    cust_gst = (sale['customer_gst'] or '').strip() if 'customer_gst' in sale.keys() else ''
+    if not party and cust_gst:
+        sc = cust_gst[:2] if len(cust_gst) >= 2 else '27'
+        party = {
+            'name': sale['customer_name'],
+            'phone': sale['customer_phone'],
+            'gst_no': cust_gst,
+            'state_code': sc,
+            'state_name': excel_helpers.GST_STATE_CODES.get(sc, 'Maharashtra'),
+            'address': '',
+            'current_balance': 0.0
+        }
+    elif party and not party.get('gst_no') and cust_gst:
+        party['gst_no'] = cust_gst
 
     conn.close()
 
@@ -1074,7 +1105,8 @@ def upload_bulk_sales_excel():
                 item_data['unit_price'] = prod['wholesale_price'] if item_data['sale_type'] == 'WHOLESALE' else prod['retail_price']
 
             ref = item_data['order_ref'] or f"ROW_{idx}"
-            grp_key = (item_data['customer_name'], item_data['customer_phone'], item_data['sale_type'], item_data['payment_mode'], ref)
+            cust_gst = item_data.get('customer_gst', '').strip().upper()
+            grp_key = (item_data['customer_name'], item_data['customer_phone'], cust_gst, item_data['sale_type'], item_data['payment_mode'], ref)
             if grp_key not in grouped_sales:
                 grouped_sales[grp_key] = []
             grouped_sales[grp_key].append(item_data)
@@ -1096,24 +1128,36 @@ def upload_bulk_sales_excel():
 
         settings_data = get_settings()
         prefix = settings_data.get('invoice_prefix', 'SSIPL').strip() or 'SSIPL'
+        cur.execute("SELECT state_code FROM settings LIMIT 1")
+        s_row = cur.fetchone()
+        shop_sc = (s_row['state_code'] if s_row and s_row['state_code'] else '27').strip()
+
         salesman_id = session.get('user_id')
         salesman_name = session.get('full_name') or session.get('username') or 'Sales Staff'
 
         total_invoices_created = 0
         total_sales_value = 0.0
 
-        for (cust_name, cust_phone, sale_type, pay_mode, ref), items in grouped_sales.items():
+        for (cust_name, cust_phone, cust_gst, sale_type, pay_mode, ref), items in grouped_sales.items():
             party_id = None
             is_interstate = 0
-            if sale_type == 'WHOLESALE' or cust_name != 'Walk-in Customer':
+            if cust_gst and len(cust_gst) >= 2 and cust_gst[:2] != shop_sc:
+                is_interstate = 1
+
+            if sale_type == 'WHOLESALE' or cust_name != 'Walk-in Customer' or cust_gst:
                 cur.execute("SELECT id, state_code, gst_no FROM parties WHERE name = ? AND party_type = 'WHOLESALE_BUYER'", (cust_name,))
                 p_row = cur.fetchone()
                 if p_row:
                     party_id = p_row['id']
-                    if p_row['gst_no'] and len(p_row['gst_no'].strip()) >= 2 and p_row['gst_no'].strip()[:2] != '27':
+                    if cust_gst and (not p_row['gst_no'] or len(p_row['gst_no'].strip()) == 0):
+                        cur.execute("UPDATE parties SET gst_no = ? WHERE id = ?", (cust_gst, party_id))
+                    p_gst = (cust_gst or p_row['gst_no'] or '').strip()
+                    if p_gst and len(p_gst) >= 2 and p_gst[:2] != shop_sc:
                         is_interstate = 1
                 else:
-                    cur.execute("INSERT INTO parties (name, phone, party_type, current_balance) VALUES (?, ?, 'WHOLESALE_BUYER', 0.0)", (cust_name, cust_phone))
+                    p_state = cust_gst[:2] if len(cust_gst) >= 2 else shop_sc
+                    p_sname = excel_helpers.GST_STATE_CODES.get(p_state, 'Maharashtra')
+                    cur.execute("INSERT INTO parties (name, phone, party_type, gst_no, state_code, state_name, current_balance) VALUES (?, ?, 'WHOLESALE_BUYER', ?, ?, ?, 0.0)", (cust_name, cust_phone, cust_gst, p_state, p_sname))
                     party_id = cur.lastrowid
 
             # Enrich items with proper HSN and GST rates
@@ -1172,12 +1216,12 @@ def upload_bulk_sales_excel():
             notes = f"Bulk Excel Import (Ref: {ref})"
 
             cur.execute("""
-                INSERT INTO sales (invoice_no, sale_type, party_id, customer_name, customer_phone, 
+                INSERT INTO sales (invoice_no, sale_type, party_id, customer_name, customer_phone, customer_gst,
                                    subtotal, discount, grand_total, payment_mode, payment_status, 
                                    paid_amount, balance_amount, notes, salesman_id, salesman_name,
                                    taxable_amount, cgst_amount, sgst_amount, igst_amount, total_tax, is_interstate)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (invoice_no, sale_type, party_id, cust_name, cust_phone, subtotal, total_discount, grand_total,
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (invoice_no, sale_type, party_id, cust_name, cust_phone, cust_gst, subtotal, total_discount, grand_total,
                   pay_mode, payment_status, paid_amount, balance_amount, notes, salesman_id, salesman_name,
                   taxable_amount, cgst_amount, sgst_amount, igst_amount, total_tax, is_interstate))
             sale_id = cur.lastrowid
@@ -1359,13 +1403,20 @@ def create_estimate():
 
         estimate_no = get_next_invoice_number(conn, prefix='EST')
 
+        customer_gst = str(data.get('customer_gst', '')).strip().upper()
+        if party_id and not customer_gst:
+            cur.execute("SELECT gst_no FROM parties WHERE id = ?", (party_id,))
+            p_g = cur.fetchone()
+            if p_g and p_g['gst_no']:
+                customer_gst = p_g['gst_no'].strip().upper()
+
         cur.execute("""
-            INSERT INTO estimates (estimate_no, party_id, customer_name, customer_phone, order_type,
+            INSERT INTO estimates (estimate_no, party_id, customer_name, customer_phone, customer_gst, order_type,
                                    subtotal, discount, grand_total, advance_amount, advance_payment_mode,
                                    balance_amount, status, expected_dispatch_date, salesman_id, salesman_name, notes,
                                    taxable_amount, cgst_amount, sgst_amount, igst_amount, total_tax, is_interstate)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'BOOKED', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (estimate_no, party_id, customer_name, customer_phone, order_type,
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'BOOKED', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (estimate_no, party_id, customer_name, customer_phone, customer_gst, order_type,
               subtotal, discount, grand_total, advance_amount, advance_payment_mode,
               balance_amount, expected_dispatch_date, salesman_id, salesman_name, notes,
               taxable_amount, cgst_amount, sgst_amount, igst_amount, total_tax, is_interstate))
@@ -1639,13 +1690,19 @@ def add_party():
         phone = request.form.get('phone', '').strip()
         party_type = request.form.get('party_type', 'WHOLESALE_BUYER')
         address = request.form.get('address', '').strip()
-        gst_no = request.form.get('gst_no', '').strip()
+        gst_no = request.form.get('gst_no', '').strip().upper()
         opening_balance = float(request.form.get('opening_balance', 0))
 
+        state_code = '27'
+        state_name = 'Maharashtra'
+        if len(gst_no) >= 2 and gst_no[:2].isdigit():
+            state_code = gst_no[:2]
+            state_name = excel_helpers.GST_STATE_CODES.get(state_code, f"State {state_code}")
+
         cur.execute("""
-            INSERT INTO parties (name, phone, party_type, address, gst_no, current_balance)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (name, phone, party_type, address, gst_no, opening_balance))
+            INSERT INTO parties (name, phone, party_type, address, gst_no, state_code, state_name, current_balance)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (name, phone, party_type, address, gst_no, state_code, state_name, opening_balance))
         conn.commit()
         flash(f'Party "{name}" added successfully!', 'success')
     except Exception as e:
@@ -1654,6 +1711,91 @@ def add_party():
         conn.close()
 
     return redirect(url_for('ledger'))
+
+@app.route('/api/parties/quick-create', methods=['POST'])
+@login_required
+@role_required(['ADMIN', 'SALESMAN', 'ACCOUNTING'])
+def quick_create_party():
+    """
+    On-the-fly registration of a Wholesale Buyer directly from the POS billing / wholesale counter.
+    Only requires: Firm Name, GST Number (optional/recommended), and Mobile Number.
+    """
+    conn = get_connection()
+    cur = conn.cursor()
+    try:
+        data = request.get_json() or {}
+        name = str(data.get('name', '')).strip()
+        gst_no = str(data.get('gst_no', '')).strip().upper()
+        phone = str(data.get('phone', '')).strip()
+
+        if not name:
+            conn.close()
+            return jsonify({'success': False, 'message': 'Firm / Business Name is required!'}), 400
+
+        # Auto-detect State Code from first 2 digits of GSTIN if present
+        cur.execute("SELECT state_code, state_name FROM settings LIMIT 1")
+        s_row = cur.fetchone()
+        shop_sc = (s_row['state_code'] if s_row and s_row['state_code'] else '27').strip()
+        shop_sn = (s_row['state_name'] if s_row and s_row['state_name'] else 'Maharashtra').strip()
+
+        state_code = shop_sc
+        state_name = shop_sn
+        if len(gst_no) >= 2 and gst_no[:2].isdigit():
+            state_code = gst_no[:2]
+            state_name = excel_helpers.GST_STATE_CODES.get(state_code, f"State {state_code}")
+
+        # 1. Check if party with this GSTIN already exists
+        if gst_no:
+            cur.execute("SELECT id, name, phone, gst_no, current_balance, state_code, state_name FROM parties WHERE gst_no = ?", (gst_no,))
+            existing_gst = cur.fetchone()
+            if existing_gst:
+                conn.close()
+                return jsonify({
+                    'success': True,
+                    'already_exists': True,
+                    'message': f'Party with GSTIN {gst_no} found ({existing_gst["name"]}). Selected automatically!',
+                    'party': dict(existing_gst)
+                })
+
+        # 2. Check if party with this exact firm name already exists
+        cur.execute("SELECT id, name, phone, gst_no, current_balance, state_code, state_name FROM parties WHERE LOWER(name) = ? AND party_type = 'WHOLESALE_BUYER'", (name.lower(),))
+        existing_name = cur.fetchone()
+        if existing_name:
+            if gst_no and not existing_name['gst_no']:
+                cur.execute("UPDATE parties SET gst_no = ?, state_code = ?, state_name = ? WHERE id = ?", (gst_no, state_code, state_name, existing_name['id']))
+            if phone and not existing_name['phone']:
+                cur.execute("UPDATE parties SET phone = ? WHERE id = ?", (phone, existing_name['id']))
+            conn.commit()
+            cur.execute("SELECT id, name, phone, gst_no, current_balance, state_code, state_name FROM parties WHERE id = ?", (existing_name['id'],))
+            updated_p = cur.fetchone()
+            conn.close()
+            return jsonify({
+                'success': True,
+                'already_exists': True,
+                'message': f'Existing party "{name}" updated and selected!',
+                'party': dict(updated_p)
+            })
+
+        # 3. Create fresh new wholesale party
+        cur.execute("""
+            INSERT INTO parties (name, phone, party_type, gst_no, state_code, state_name, current_balance)
+            VALUES (?, ?, 'WHOLESALE_BUYER', ?, ?, ?, 0.0)
+        """, (name, phone, gst_no, state_code, state_name))
+        party_id = cur.lastrowid
+        conn.commit()
+
+        cur.execute("SELECT id, name, phone, gst_no, current_balance, state_code, state_name FROM parties WHERE id = ?", (party_id,))
+        new_p = cur.fetchone()
+        conn.close()
+        return jsonify({
+            'success': True,
+            'message': f'New party "{name}" registered and selected!',
+            'party': dict(new_p)
+        })
+    except Exception as e:
+        conn.rollback()
+        conn.close()
+        return jsonify({'success': False, 'message': str(e)}), 500
 
 # ----------------- STAFF / USER MANAGEMENT -----------------
 @app.route('/users')

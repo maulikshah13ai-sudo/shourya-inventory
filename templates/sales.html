@@ -118,7 +118,12 @@
                         </td>
                         <td class="py-3 px-4">
                             <div class="font-bold text-slate-800">{{ s.customer_name }}</div>
-                            {% if s.customer_phone %}<div class="text-slate-400">{{ s.customer_phone }}</div>{% endif %}
+                            {% if s.gst_no %}
+                            <div class="text-[10px] font-mono font-bold text-indigo-700 mt-0.5 flex items-center gap-1">
+                                <span class="bg-indigo-50 border border-indigo-200 px-1.5 py-0.5 rounded">GST: {{ s.gst_no }}</span>
+                            </div>
+                            {% endif %}
+                            {% if s.customer_phone %}<div class="text-slate-400 text-[11px] mt-0.5">{{ s.customer_phone }}</div>{% endif %}
                         </td>
                         <td class="py-3 px-4 text-slate-600">{{ s.created_at[:16] }}</td>
                         <td class="py-3 px-4 text-slate-500">

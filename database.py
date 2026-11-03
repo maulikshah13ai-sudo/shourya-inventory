@@ -131,6 +131,8 @@ def init_db():
 
         ("ALTER TABLE parties ADD COLUMN state_code TEXT DEFAULT '27'", "parties.state_code"),
         ("ALTER TABLE parties ADD COLUMN state_name TEXT DEFAULT 'Maharashtra'", "parties.state_name"),
+        ("ALTER TABLE sales ADD COLUMN customer_gst TEXT DEFAULT ''", "sales.customer_gst"),
+        ("ALTER TABLE estimates ADD COLUMN customer_gst TEXT DEFAULT ''", "estimates.customer_gst"),
     ]
     for sql_query, col in gst_migrations:
         try:

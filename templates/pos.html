@@ -148,26 +148,68 @@
             <!-- Customer / Party Info -->
             <div class="p-3 bg-slate-50 border-b border-slate-200 space-y-2.5 shrink-0">
                 <div id="wholesalePartySelectRow" class="hidden">
-                    <label class="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">Select Wholesale Buyer (Party)</label>
+                    <div class="flex items-center justify-between mb-1">
+                        <label class="block text-[11px] font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1">
+                            <i data-lucide="building-2" class="w-3.5 h-3.5 text-indigo-600"></i> Wholesale Buyer (Party)
+                        </label>
+                        <button type="button" onclick="openQuickAddPartyModal()" class="px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold shadow-xs transition flex items-center gap-1.5" title="Register new firm on the fly">
+                            <i data-lucide="user-plus" class="w-3.5 h-3.5"></i> + Add New Party
+                        </button>
+                    </div>
                     <select id="partySelect" onchange="handlePartyChange(this)" class="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs focus:ring-1 focus:ring-sky-500 font-semibold">
                         <option value="">-- Select Registered Buyer or Type Below --</option>
                         {% for party in parties %}
-                        <option value="{{ party.id }}" data-balance="{{ party.current_balance }}" data-phone="{{ party.phone }}" data-gst="{{ party.gst_no or '' }}" data-state="{{ party.state_code or '' }}">
-                            {{ party.name }} (Udhar: {{ settings.currency_symbol }}{{ party.current_balance }})
+                        <option value="{{ party.id }}"
+                                data-name="{{ party.name }}"
+                                data-balance="{{ party.current_balance }}"
+                                data-phone="{{ party.phone or '' }}"
+                                data-gst="{{ party.gst_no or '' }}"
+                                data-state="{{ party.state_code or '' }}"
+                                data-statename="{{ party.state_name or '' }}">
+                            {{ party.name }}{% if party.gst_no %} [GSTIN: {{ party.gst_no }}]{% endif %} (Udhar: {{ settings.currency_symbol }}{{ "{:,.2f}".format(party.current_balance) }})
                         </option>
                         {% endfor %}
                     </select>
-                    <div id="partyBalanceNotice" class="hidden mt-1.5 text-xs text-amber-700 bg-amber-50 p-2 rounded-lg border border-amber-200 font-medium"></div>
+
+                    <!-- Prominent Party GST Badge & Khata Details -->
+                    <div id="partyGstInfoCard" class="hidden mt-2 p-2.5 bg-indigo-50/90 rounded-xl border border-indigo-200 text-xs space-y-1.5">
+                        <div class="flex items-center justify-between">
+                            <span class="font-bold text-indigo-950 flex items-center gap-1.5">
+                                <i data-lucide="shield-check" class="w-4 h-4 text-indigo-600"></i> Party GST Number:
+                            </span>
+                            <span id="partyGstBadge" class="font-mono font-black text-indigo-800 text-xs px-2.5 py-0.5 bg-white rounded-lg border border-indigo-200 shadow-2xs">
+                                --
+                            </span>
+                        </div>
+                        <div class="flex items-center justify-between text-[11px]">
+                            <span class="text-slate-600">Place of Supply (POS):</span>
+                            <span id="partyStateBadge" class="font-bold text-slate-800">--</span>
+                        </div>
+                        <div id="partyBalanceNotice" class="hidden pt-1.5 border-t border-indigo-200/60 text-[11px] text-amber-800 font-semibold"></div>
+                    </div>
                 </div>
 
                 <div class="grid grid-cols-2 gap-2">
                     <div>
-                        <label class="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-0.5">Customer Name</label>
+                        <label class="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-0.5">Firm / Customer Name</label>
                         <input type="text" id="custName" value="Walk-in Customer" placeholder="Name" class="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-semibold">
                     </div>
                     <div>
                         <label class="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-0.5">Mobile / WhatsApp</label>
                         <input type="text" id="custPhone" placeholder="Mobile Number" class="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-semibold">
+                    </div>
+                </div>
+
+                <!-- Buyer GST Number Field (Directly visible in Wholesale / B2B) -->
+                <div id="rowCustomerGst" class="hidden">
+                    <div class="flex items-center justify-between mb-0.5">
+                        <label class="block text-[10px] font-bold text-slate-500 uppercase tracking-wider">Party GSTIN / Tax ID</label>
+                        <span id="gstStateDetectText" class="text-[10px] font-medium text-slate-400">15-digit GSTIN</span>
+                    </div>
+                    <div class="relative">
+                        <input type="text" id="custGst" placeholder="e.g. 27AABCS1429B1ZB" maxlength="15"
+                               class="w-full uppercase font-mono px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-bold text-indigo-900 focus:ring-1 focus:ring-indigo-500"
+                               oninput="handleGstInput(this.value)">
                     </div>
                 </div>
 
@@ -264,6 +306,64 @@
     </div>
 
 </div>
+
+<!-- Quick Add Party Modal (Directly in Wholesale / POS) -->
+<div id="quickPartyModal" class="hidden fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+    <div class="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 transition-all">
+        <div class="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
+            <div class="flex items-center gap-2.5">
+                <div class="w-9 h-9 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold">
+                    <i data-lucide="building" class="w-5 h-5"></i>
+                </div>
+                <div>
+                    <h3 class="font-black text-slate-900 text-base leading-tight">Add New Wholesale Party</h3>
+                    <p class="text-xs text-slate-400">Quick register buyer & bill right now</p>
+                </div>
+            </div>
+            <button type="button" onclick="closeQuickAddPartyModal()" class="text-slate-400 hover:text-slate-700 p-1 rounded-lg">
+                <i data-lucide="x" class="w-5 h-5"></i>
+            </button>
+        </div>
+
+        <form id="quickPartyForm" onsubmit="submitQuickParty(event)" class="space-y-3.5">
+            <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1">
+                    Firm / Business Name <span class="text-rose-500">*</span>
+                </label>
+                <input type="text" id="quickPartyName" required placeholder="e.g. Shree Balaji Luggage Mart"
+                       class="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-800 focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+            </div>
+
+            <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1 flex items-center justify-between">
+                    <span>GST Number (GSTIN)</span>
+                    <span class="text-[10px] text-slate-400 font-normal">15 characters</span>
+                </label>
+                <input type="text" id="quickPartyGst" maxlength="15" placeholder="e.g. 27AABCS1429B1ZB"
+                       class="w-full uppercase font-mono px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-indigo-900 focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                       oninput="detectQuickModalState(this.value)">
+                <p id="quickModalStateText" class="text-[11px] text-slate-500 mt-1 font-medium"></p>
+            </div>
+
+            <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1">
+                    Mobile Number <span class="text-[10px] text-slate-400 font-normal">(For WhatsApp & billing)</span>
+                </label>
+                <input type="text" id="quickPartyPhone" placeholder="e.g. 98250 12345"
+                       class="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-800 focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+            </div>
+
+            <div class="pt-3 border-t border-slate-100 flex items-center justify-end gap-2">
+                <button type="button" onclick="closeQuickAddPartyModal()" class="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 transition">
+                    Cancel
+                </button>
+                <button type="submit" id="btnSaveQuickParty" class="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black shadow-md shadow-indigo-600/30 transition flex items-center gap-1.5">
+                    <i data-lucide="check" class="w-4 h-4"></i> Save & Select for this Bill
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
@@ -294,12 +394,27 @@
         calculateTotals();
     }
 
+    const SHOP_STATE_CODE = "{{ settings.state_code or '27' }}".trim();
+    const gstStateCodesMap = {
+        "01": "Jammu & Kashmir", "02": "Himachal Pradesh", "03": "Punjab", "04": "Chandigarh",
+        "05": "Uttarakhand", "06": "Haryana", "07": "Delhi", "08": "Rajasthan",
+        "09": "Uttar Pradesh", "10": "Bihar", "11": "Sikkim", "12": "Arunachal Pradesh",
+        "13": "Nagaland", "14": "Manipur", "15": "Mizoram", "16": "Tripura",
+        "17": "Meghalaya", "18": "Assam", "19": "West Bengal", "20": "Jharkhand",
+        "21": "Odisha", "22": "Chhattisgarh", "23": "Madhya Pradesh", "24": "Gujarat",
+        "25": "Daman and Diu", "26": "Dadra and Nagar Haveli", "27": "Maharashtra",
+        "29": "Karnataka", "30": "Goa", "31": "Lakshadweep", "32": "Kerala",
+        "33": "Tamil Nadu", "34": "Puducherry", "35": "Andaman & Nicobar",
+        "36": "Telangana", "37": "Andhra Pradesh", "38": "Ladakh"
+    };
+
     function setBillingMode(mode) {
         currentMode = mode;
         const btnRetail = document.getElementById('btnModeRetail');
         const btnWholesale = document.getElementById('btnModeWholesale');
         const modeBadge = document.getElementById('modeBadge');
         const wsPartyRow = document.getElementById('wholesalePartySelectRow');
+        const rowGst = document.getElementById('rowCustomerGst');
 
         if (mode === 'RETAIL') {
             btnRetail.className = "px-4 py-2 rounded-lg transition bg-white text-emerald-700 shadow-xs flex items-center gap-1.5 font-bold";
@@ -307,6 +422,7 @@
             modeBadge.innerText = "RETAIL SALE";
             modeBadge.className = "text-xs text-emerald-400 font-semibold";
             wsPartyRow.classList.add('hidden');
+            if (rowGst) rowGst.classList.add('hidden');
             if (document.getElementById('custName').value === '') {
                 document.getElementById('custName').value = 'Walk-in Customer';
             }
@@ -316,6 +432,7 @@
             modeBadge.innerText = "WHOLESALE SALE (BULK)";
             modeBadge.className = "text-xs text-indigo-400 font-semibold";
             wsPartyRow.classList.remove('hidden');
+            if (rowGst) rowGst.classList.remove('hidden');
             if (document.getElementById('custName').value === 'Walk-in Customer') {
                 document.getElementById('custName').value = '';
             }
@@ -335,32 +452,158 @@
     function handlePartyChange(select) {
         const option = select.options[select.selectedIndex];
         const notice = document.getElementById('partyBalanceNotice');
+        const gstCard = document.getElementById('partyGstInfoCard');
+        const badgeGst = document.getElementById('partyGstBadge');
+        const badgeState = document.getElementById('partyStateBadge');
+
         if (select.value) {
             const balance = parseFloat(option.dataset.balance || 0);
             const phone = option.dataset.phone || '';
-            const gst = (option.dataset.gst || '').trim();
+            const gst = (option.dataset.gst || '').trim().toUpperCase();
             const state = (option.dataset.state || '').trim();
+            const stateName = (option.dataset.statename || '').trim();
+            const firmName = (option.dataset.name || option.text.split('[')[0].split('(')[0]).trim();
 
-            document.getElementById('custName').value = option.text.split('(')[0].trim();
+            document.getElementById('custName').value = firmName;
             document.getElementById('custPhone').value = phone;
-
-            // Auto-detect Inter-State (IGST) if buyer GSTIN / State is outside Maharashtra (27)
-            if (state && state !== '27') {
-                setGstType(true);
-            } else if (gst && gst.length >= 2 && !gst.startsWith('27')) {
-                setGstType(true);
-            } else {
-                setGstType(false);
+            const custGstInp = document.getElementById('custGst');
+            if (custGstInp) {
+                custGstInp.value = gst;
             }
 
+            if (gstCard) {
+                gstCard.classList.remove('hidden');
+                if (gst) {
+                    badgeGst.innerText = gst;
+                    badgeGst.className = "font-mono font-black text-indigo-800 text-xs px-2.5 py-0.5 bg-white rounded-lg border border-indigo-200 shadow-2xs";
+                    const resolvedName = stateName || gstStateCodesMap[state || gst.substring(0, 2)] || 'State';
+                    badgeState.innerText = `${resolvedName} (State Code: ${state || gst.substring(0, 2)})`;
+                } else {
+                    badgeGst.innerText = "Unregistered Buyer (No GSTIN)";
+                    badgeGst.className = "font-sans font-bold text-slate-500 text-xs px-2 py-0.5 bg-slate-100 rounded border border-slate-200";
+                    badgeState.innerText = "Intra-State (Default)";
+                }
+            }
+
+            handleGstInput(gst);
+
             if (balance > 0) {
-                notice.innerHTML = `⚠️ <b>Existing Credit Balance:</b> This buyer owes <b>${CURRENCY}${balance.toFixed(2)}</b> from previous purchases.`;
+                notice.innerHTML = `⚠️ <b>Existing Khata Balance:</b> This buyer owes <b>${CURRENCY}${balance.toFixed(2)}</b> from previous bills.`;
                 notice.classList.remove('hidden');
             } else {
                 notice.classList.add('hidden');
             }
         } else {
-            notice.classList.add('hidden');
+            if (gstCard) gstCard.classList.add('hidden');
+            if (notice) notice.classList.add('hidden');
+        }
+    }
+
+    function handleGstInput(val) {
+        val = (val || '').toUpperCase().trim();
+        const stateHelp = document.getElementById('gstStateDetectText');
+
+        if (val.length >= 2 && /^\d{2}/.test(val)) {
+            const sc = val.substring(0, 2);
+            const stateName = gstStateCodesMap[sc] || 'Other State';
+            if (sc !== SHOP_STATE_CODE) {
+                setGstType(true); // Inter-State IGST
+                if (stateHelp) stateHelp.innerHTML = `<span class="text-purple-700 font-bold">🚚 Inter-State (IGST 18%): ${stateName} (${sc})</span>`;
+            } else {
+                setGstType(false); // Intra-State CGST+SGST
+                if (stateHelp) stateHelp.innerHTML = `<span class="text-emerald-700 font-bold">🏢 Intra-State (CGST+SGST): ${stateName} (${sc})</span>`;
+            }
+        } else if (val.length === 0) {
+            if (stateHelp) stateHelp.innerText = '15-digit GSTIN (Optional)';
+        }
+    }
+
+    // Quick Add Party Modal Functions (Inline on Billing Screen)
+    function openQuickAddPartyModal() {
+        document.getElementById('quickPartyModal').classList.remove('hidden');
+        document.getElementById('quickPartyName').focus();
+    }
+
+    function closeQuickAddPartyModal() {
+        document.getElementById('quickPartyModal').classList.add('hidden');
+        document.getElementById('quickPartyForm').reset();
+        document.getElementById('quickModalStateText').innerText = '';
+    }
+
+    function detectQuickModalState(val) {
+        val = (val || '').toUpperCase().trim();
+        const text = document.getElementById('quickModalStateText');
+        if (val.length >= 2 && /^\d{2}/.test(val)) {
+            const sc = val.substring(0, 2);
+            const name = gstStateCodesMap[sc] || 'Other State';
+            text.innerHTML = `<span class="text-indigo-600 font-semibold">📍 State Detected: <b>${name}</b> (Code: ${sc})</span>`;
+        } else {
+            text.innerText = '';
+        }
+    }
+
+    async function submitQuickParty(e) {
+        e.preventDefault();
+        const name = document.getElementById('quickPartyName').value.trim();
+        const gst_no = document.getElementById('quickPartyGst').value.trim().toUpperCase();
+        const phone = document.getElementById('quickPartyPhone').value.trim();
+
+        if (!name) {
+            alert('Please enter Firm / Business Name!');
+            return;
+        }
+
+        const btn = document.getElementById('btnSaveQuickParty');
+        btn.disabled = true;
+        btn.innerHTML = `<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> Saving...`;
+        lucide.createIcons();
+
+        try {
+            const res = await fetch('/api/parties/quick-create', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, gst_no, phone })
+            });
+            const data = await res.json();
+            if (data.success && data.party) {
+                const p = data.party;
+                const select = document.getElementById('partySelect');
+
+                // Check if already in dropdown
+                let existingOpt = Array.from(select.options).find(o => o.value == p.id);
+                if (!existingOpt) {
+                    const opt = document.createElement('option');
+                    opt.value = p.id;
+                    opt.dataset.name = p.name;
+                    opt.dataset.balance = p.current_balance || 0;
+                    opt.dataset.phone = p.phone || '';
+                    opt.dataset.gst = p.gst_no || '';
+                    opt.dataset.state = p.state_code || '';
+                    opt.dataset.statename = p.state_name || '';
+                    opt.text = `${p.name}${p.gst_no ? ' [GSTIN: ' + p.gst_no + ']' : ''} (Udhar: ${CURRENCY}0.00)`;
+                    select.appendChild(opt);
+                    existingOpt = opt;
+                } else {
+                    existingOpt.dataset.name = p.name;
+                    existingOpt.dataset.gst = p.gst_no || '';
+                    existingOpt.dataset.phone = p.phone || '';
+                    existingOpt.dataset.state = p.state_code || '';
+                    existingOpt.dataset.statename = p.state_name || '';
+                }
+
+                select.value = p.id;
+                handlePartyChange(select);
+                closeQuickAddPartyModal();
+                alert(data.message || `Party "${p.name}" registered and selected!`);
+            } else {
+                alert(`Error: ${data.message || 'Could not add party'}`);
+            }
+        } catch (err) {
+            alert(`Error adding party: ${err.message}`);
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = `<i data-lucide="check" class="w-4 h-4"></i> Save & Select for this Bill`;
+            lucide.createIcons();
         }
     }
 
@@ -589,6 +832,7 @@
 
         const customerName = document.getElementById('custName').value.trim() || 'Walk-in Customer';
         const customerPhone = document.getElementById('custPhone').value.trim();
+        const customerGst = (document.getElementById('custGst') ? document.getElementById('custGst').value.trim().toUpperCase() : '');
         const partyId = document.getElementById('partySelect').value || null;
         const paymentMode = document.getElementById('paymentMode').value;
         const discount = parseFloat(document.getElementById('inputDiscount').value) || 0;
@@ -611,6 +855,7 @@
                     sale_type: currentMode,
                     customer_name: customerName,
                     customer_phone: customerPhone,
+                    customer_gst: customerGst,
                     party_id: partyId,
                     subtotal: subtotal,
                     discount: discount,
@@ -660,6 +905,7 @@
 
         const customerName = document.getElementById('custName').value.trim() || 'Walk-in Customer';
         const customerPhone = document.getElementById('custPhone').value.trim();
+        const customerGst = (document.getElementById('custGst') ? document.getElementById('custGst').value.trim().toUpperCase() : '');
         const partyId = document.getElementById('partySelect').value || null;
         const discount = parseFloat(document.getElementById('inputDiscount').value) || 0;
         let subtotal = 0;
@@ -678,6 +924,7 @@
                 body: JSON.stringify({
                     customer_name: customerName,
                     customer_phone: customerPhone,
+                    customer_gst: customerGst,
                     party_id: partyId,
                     order_type: currentMode,
                     subtotal: subtotal,

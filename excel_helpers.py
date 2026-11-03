@@ -263,13 +263,28 @@ def generate_bulk_purchase_template(file_format="xlsx"):
     return buf.getvalue(), "bulk_purchase_template.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 
+# Standard Indian GST State Codes Map (2-digit GSTIN prefix)
+GST_STATE_CODES = {
+    "01": "Jammu & Kashmir", "02": "Himachal Pradesh", "03": "Punjab", "04": "Chandigarh",
+    "05": "Uttarakhand", "06": "Haryana", "07": "Delhi", "08": "Rajasthan",
+    "09": "Uttar Pradesh", "10": "Bihar", "11": "Sikkim", "12": "Arunachal Pradesh",
+    "13": "Nagaland", "14": "Manipur", "15": "Mizoram", "16": "Tripura",
+    "17": "Meghalaya", "18": "Assam", "19": "West Bengal", "20": "Jharkhand",
+    "21": "Odisha", "22": "Chhattisgarh", "23": "Madhya Pradesh", "24": "Gujarat",
+    "25": "Daman and Diu", "26": "Dadra and Nagar Haveli", "27": "Maharashtra",
+    "29": "Karnataka", "30": "Goa", "31": "Lakshadweep", "32": "Kerala",
+    "33": "Tamil Nadu", "34": "Puducherry", "35": "Andaman & Nicobar",
+    "36": "Telangana", "37": "Andhra Pradesh", "38": "Ladakh", "97": "Other Territory"
+}
+
 def generate_bulk_sale_template(file_format="xlsx"):
     """
-    Generates a pre-formatted Bulk Sale Template with HSN code and GST rate columns.
+    Generates a pre-formatted Bulk Sale Template with HSN code, GST rate, and Party GST Number columns.
     """
     headers = [
         "Customer Name",
         "Customer Phone",
+        "Party GST Number",
         "Sale Type",
         "Payment Mode",
         "Order Reference",
@@ -285,15 +300,15 @@ def generate_bulk_sale_template(file_format="xlsx"):
 
     sample_rows = [
         [
-            "Metro Fashion Retailers", "9899088776", "WHOLESALE", "CREDIT",
+            "Metro Fashion Retailers", "9899088776", "27AABCS1429B1ZB", "WHOLESALE", "CREDIT",
             "ORD-101", "BAG-BP-001", "4202", 18.0, 10, 720.0, 0, 0, "Bulk wholesale delivery 1"
         ],
         [
-            "Metro Fashion Retailers", "9899088776", "WHOLESALE", "CREDIT",
+            "Metro Fashion Retailers", "9899088776", "27AABCS1429B1ZB", "WHOLESALE", "CREDIT",
             "ORD-101", "SH-SNK-01-08", "6404", 18.0, 12, 800.0, 0, 0, "Same invoice item 2"
         ],
         [
-            "Walk-in Customer", "9812345678", "RETAIL", "UPI",
+            "Walk-in Customer", "9812345678", "", "RETAIL", "UPI",
             "ORD-102", "BAG-WL-401", "4202", 18.0, 3, 399.0, 50.0, 1147.0, "Retail counter purchase"
         ]
     ]
@@ -510,6 +525,7 @@ def extract_purchase_row_data(row):
 def extract_sale_row_data(row):
     customer_name = str(get_field_val(row, ['customername', 'customer', 'partyname', 'buyer', 'party'], 'Walk-in Customer')).strip()
     customer_phone = str(get_field_val(row, ['customerphone', 'phone', 'mobile', 'whatsapp', 'contact'], '')).strip()
+    customer_gst = str(get_field_val(row, ['partygstnumber', 'partygst', 'customergst', 'gstnumber', 'gstno', 'gstin'], '')).strip().upper()
     
     sale_type = str(get_field_val(row, ['saletype', 'type'], 'WHOLESALE')).strip().upper()
     if 'retail' in sale_type.lower():
@@ -559,6 +575,7 @@ def extract_sale_row_data(row):
     return {
         'customer_name': customer_name,
         'customer_phone': customer_phone,
+        'customer_gst': customer_gst,
         'sale_type': sale_type,
         'payment_mode': payment_mode,
         'order_ref': order_ref,
@@ -593,7 +610,8 @@ def generate_gstr1_excel_report(conn, start_date=None, end_date=None):
         SELECT s.id, s.invoice_no, s.sale_type, s.customer_name, s.customer_phone,
                s.subtotal, s.discount, s.grand_total, s.taxable_amount, s.cgst_amount,
                s.sgst_amount, s.igst_amount, s.total_tax, s.is_interstate, s.created_at,
-               p.gst_no, p.state_code as buyer_state_code, p.address as buyer_address
+               COALESCE(NULLIF(s.customer_gst, ''), p.gst_no) as gst_no,
+               p.state_code as buyer_state_code, p.address as buyer_address
         FROM sales s
         LEFT JOIN parties p ON s.party_id = p.id
         WHERE 1=1
