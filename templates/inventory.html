@@ -72,6 +72,7 @@
                     <tr>
                         <th class="py-3 px-4">Item Details</th>
                         <th class="py-3 px-4">Category / Type</th>
+                        <th class="py-3 px-4">HSN / GST</th>
                         <th class="py-3 px-4">Size & Color</th>
                         <th class="py-3 px-4 text-center">In Stock</th>
                         <th class="py-3 px-4">Cost Price</th>
@@ -99,6 +100,12 @@
                                 {{ p.category }}
                             </span>
                             <div class="text-xs text-slate-500 mt-1">{{ p.subcategory or 'Standard' }}</div>
+                        </td>
+
+                        <!-- HSN & GST -->
+                        <td class="py-3.5 px-4 text-xs">
+                            <div class="font-mono font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-md inline-block border border-indigo-100">{{ p.hsn_code or ('4202' if p.category == 'Bags' else '6404') }}</div>
+                            <div class="text-[11px] text-slate-600 font-bold mt-1">{{ p.gst_rate or 18 }}% GST</div>
                         </td>
 
                         <!-- Size & Color -->
@@ -230,6 +237,22 @@
                 </div>
 
                 <div>
+                    <label class="block text-xs font-bold text-slate-700 mb-1">HSN Code *</label>
+                    <input type="text" name="hsn_code" id="addHsn" value="4202" placeholder="4202 or 6404" class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-mono font-bold text-indigo-700">
+                    <p class="text-[10px] text-slate-400 mt-0.5">Bags: 4202 | Footwear: 6404</p>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-bold text-slate-700 mb-1">GST Rate (%) *</label>
+                    <select name="gst_rate" id="addGstRate" class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-semibold">
+                        <option value="18.0" selected>18% (Standard GST for Bags & Footwear)</option>
+                        <option value="12.0">12% (Affordable Footwear & Goods)</option>
+                        <option value="5.0">5% (Low Cost Items)</option>
+                        <option value="0.0">0% (Nil / Exempted)</option>
+                    </select>
+                </div>
+
+                <div>
                     <label class="block text-xs font-bold text-slate-700 mb-1">Shelf / Warehouse Location</label>
                     <input type="text" name="location" placeholder="e.g. Rack A-2, Floor Godown" class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs">
                 </div>
@@ -319,6 +342,19 @@
                 <div>
                     <label class="block text-xs font-bold text-slate-700 mb-1">Unit</label>
                     <input type="text" name="unit" id="editUnit" class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-slate-700 mb-1">HSN Code *</label>
+                    <input type="text" name="hsn_code" id="editHsn" class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-mono font-bold text-indigo-700">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-slate-700 mb-1">GST Rate (%) *</label>
+                    <select name="gst_rate" id="editGstRate" class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-semibold">
+                        <option value="18.0">18% (Standard GST for Bags & Footwear)</option>
+                        <option value="12.0">12% (Affordable Footwear & Goods)</option>
+                        <option value="5.0">5% (Low Cost Items)</option>
+                        <option value="0.0">0% (Nil / Exempted)</option>
+                    </select>
                 </div>
             </div>
 
@@ -410,18 +446,23 @@
         const inpSize = document.getElementById('inpSize');
         const subcat = document.getElementById('addSubcategory');
 
+        const inpAddHsn = document.getElementById('addHsn');
+
         if (cat === 'Shoes') {
             lblSize.innerText = "Shoe Size (UK/EU, e.g. UK 7, UK 8, UK 9)";
             inpSize.placeholder = "e.g. UK 8";
             subcat.placeholder = "e.g. Running Sneakers / Formal Oxford / Block Heels";
+            if (inpAddHsn) inpAddHsn.value = '6404';
         } else if (cat === 'Bags') {
             lblSize.innerText = "Bag Size / Capacity (e.g. 35L / 24-Inch / Medium)";
             inpSize.placeholder = "e.g. 35L or Medium";
             subcat.placeholder = "e.g. Backpack / Handbag / Luggage / School Bag";
+            if (inpAddHsn) inpAddHsn.value = '4202';
         } else {
             lblSize.innerText = "Size / Variant";
             inpSize.placeholder = "Standard";
             subcat.placeholder = "e.g. Leather Wallet / Belt";
+            if (inpAddHsn) inpAddHsn.value = '4202';
         }
     }
 
@@ -448,6 +489,8 @@
         document.getElementById('editStock').value = prod.stock_qty;
         document.getElementById('editMinAlert').value = prod.min_alert_qty;
         document.getElementById('editLocation').value = prod.location || '';
+        document.getElementById('editHsn').value = prod.hsn_code || (prod.category === 'Bags' ? '4202' : '6404');
+        document.getElementById('editGstRate').value = (prod.gst_rate !== undefined && prod.gst_rate !== null) ? parseFloat(prod.gst_rate).toFixed(1) : "18.0";
 
         document.getElementById('modalEditProduct').classList.remove('hidden');
         lucide.createIcons();

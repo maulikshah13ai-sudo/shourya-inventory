@@ -48,6 +48,8 @@
                  data-sku="{{ p.sku }}"
                  data-name="{{ p.name }}"
                  data-category="{{ p.category }}"
+                 data-hsn="{{ p.hsn_code or ('4202' if p.category == 'Bags' else '6404') }}"
+                 data-gstrate="{{ p.gst_rate or 18.0 }}"
                  data-size="{{ p.size or '' }}"
                  data-color="{{ p.color or '' }}"
                  data-unit="{{ p.unit }}"
@@ -57,9 +59,12 @@
                  data-stock="{{ p.stock_qty }}"
                  onclick="addToCartFromCard(this)">
                 <div>
-                    <div class="flex items-center justify-between gap-2">
+                    <div class="flex items-center justify-between gap-1 flex-wrap">
                         <span class="text-[10px] font-black uppercase px-2 py-0.5 rounded {% if p.category == 'Shoes' %}bg-amber-100 text-amber-800{% else %}bg-purple-100 text-purple-800{% endif %}">
                             {{ p.category }}
+                        </span>
+                        <span class="text-[10px] font-mono font-bold bg-indigo-50 text-indigo-700 px-1.5 py-0.5 rounded border border-indigo-100">
+                            HSN: {{ p.hsn_code or ('4202' if p.category == 'Bags' else '6404') }}
                         </span>
                         <span class="text-xs font-mono text-slate-400">{{ p.sku }}</span>
                     </div>
@@ -123,7 +128,7 @@
                     <select id="partySelect" onchange="handlePartyChange(this)" class="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs focus:ring-1 focus:ring-sky-500">
                         <option value="">-- Select Registered Buyer or Type Below --</option>
                         {% for party in parties %}
-                        <option value="{{ party.id }}" data-balance="{{ party.current_balance }}" data-phone="{{ party.phone }}">
+                        <option value="{{ party.id }}" data-balance="{{ party.current_balance }}" data-phone="{{ party.phone }}" data-gst="{{ party.gst_no or '' }}" data-state="{{ party.state_code or '' }}">
                             {{ party.name }} (Udhar: {{ settings.currency_symbol }}{{ party.current_balance }})
                         </option>
                         {% endfor %}
@@ -141,10 +146,23 @@
                         <input type="text" id="custPhone" placeholder="Mobile / WhatsApp" class="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs">
                     </div>
                 </div>
+
+                <!-- GST Supply Type Toggle -->
+                <div class="pt-2 border-t border-slate-200/80 flex items-center justify-between text-xs">
+                    <span class="font-bold text-[11px] text-slate-600">GST Supply Type:</span>
+                    <div class="flex items-center gap-1 bg-white p-0.5 rounded-lg border border-slate-300">
+                        <button type="button" id="btnIntraState" onclick="setGstType(false)" class="px-2 py-1 rounded text-[11px] font-bold bg-emerald-600 text-white shadow-xs transition">
+                            Intra-State (CGST+SGST)
+                        </button>
+                        <button type="button" id="btnInterState" onclick="setGstType(true)" class="px-2 py-1 rounded text-[11px] font-semibold text-slate-600 hover:text-slate-900 transition">
+                            Inter-State (IGST)
+                        </button>
+                    </div>
+                </div>
             </div>
 
             <!-- Cart Items List -->
-            <div id="cartItemsContainer" class="p-4 space-y-2.5 max-h-[280px] overflow-y-auto divide-y divide-slate-100 flex-1">
+            <div id="cartItemsContainer" class="p-4 space-y-2.5 max-h-[260px] overflow-y-auto divide-y divide-slate-100 flex-1">
                 <div id="emptyCartMessage" class="text-center py-10 text-slate-400">
                     <i data-lucide="shopping-bag" class="w-10 h-10 mx-auto mb-2 opacity-30"></i>
                     <p class="text-sm font-medium">No items added to bill yet.</p>
@@ -153,11 +171,23 @@
             </div>
 
             <!-- Cart Calculations & Checkout Footer -->
-            <div class="p-4 bg-slate-50 border-t border-slate-200 space-y-3">
+            <div class="p-4 bg-slate-50 border-t border-slate-200 space-y-2.5">
                 <div class="space-y-1.5 text-xs text-slate-600">
                     <div class="flex justify-between items-center">
-                        <span>Items Subtotal:</span>
+                        <span>Gross Items Value:</span>
                         <span id="txtSubtotal" class="font-bold text-slate-800 text-sm">{{ settings.currency_symbol }}0.00</span>
+                    </div>
+                    <div class="flex justify-between items-center text-[11px] text-slate-500">
+                        <span>Taxable Amount (Base):</span>
+                        <span id="txtTaxable" class="font-medium font-mono text-slate-700">{{ settings.currency_symbol }}0.00</span>
+                    </div>
+                    <div id="cgstSgstRow" class="flex justify-between items-center text-[11px] text-slate-500">
+                        <span>CGST + SGST (9% + 9%):</span>
+                        <span id="txtCgstSgst" class="font-medium font-mono text-indigo-700">{{ settings.currency_symbol }}0.00</span>
+                    </div>
+                    <div id="igstRow" class="hidden flex justify-between items-center text-[11px] text-slate-500">
+                        <span>IGST (18%):</span>
+                        <span id="txtIgst" class="font-medium font-mono text-purple-700">{{ settings.currency_symbol }}0.00</span>
                     </div>
                     <div class="flex justify-between items-center">
                         <span class="flex items-center gap-1">
@@ -167,7 +197,7 @@
                                class="w-20 px-2 py-1 text-right bg-white border border-slate-300 rounded text-xs font-semibold">
                     </div>
                     <div class="flex justify-between items-center pt-2 border-t border-slate-200 text-base font-black text-slate-900">
-                        <span>Grand Total:</span>
+                        <span>Total Payable (Incl. GST):</span>
                         <span id="txtGrandTotal" class="text-emerald-700 text-lg">{{ settings.currency_symbol }}0.00</span>
                     </div>
                 </div>
@@ -215,8 +245,30 @@
 {% block scripts %}
 <script>
     let currentMode = 'RETAIL'; // 'RETAIL' or 'WHOLESALE'
-    let cart = []; // Array of { id, name, sku, size, color, unit, price, cost_price, quantity, max_stock }
+    let isInterState = false;   // Intra-State (CGST+SGST) vs Inter-State (IGST)
+    let cart = []; // Array of { id, name, sku, size, color, unit, price, cost_price, quantity, max_stock, hsn_code, gst_rate }
     const CURRENCY = "{{ settings.currency_symbol }}";
+
+    function setGstType(isInter) {
+        isInterState = isInter;
+        const btnIntra = document.getElementById('btnIntraState');
+        const btnInter = document.getElementById('btnInterState');
+        const rowCgstSgst = document.getElementById('cgstSgstRow');
+        const rowIgst = document.getElementById('igstRow');
+
+        if (isInter) {
+            btnInter.className = "px-2 py-1 rounded text-[11px] font-bold bg-purple-700 text-white shadow-xs transition";
+            btnIntra.className = "px-2 py-1 rounded text-[11px] font-semibold text-slate-600 hover:text-slate-900 transition";
+            rowCgstSgst.classList.add('hidden');
+            rowIgst.classList.remove('hidden');
+        } else {
+            btnIntra.className = "px-2 py-1 rounded text-[11px] font-bold bg-emerald-600 text-white shadow-xs transition";
+            btnInter.className = "px-2 py-1 rounded text-[11px] font-semibold text-slate-600 hover:text-slate-900 transition";
+            rowCgstSgst.classList.remove('hidden');
+            rowIgst.classList.add('hidden');
+        }
+        calculateTotals();
+    }
 
     function setBillingMode(mode) {
         currentMode = mode;
@@ -262,8 +314,20 @@
         if (select.value) {
             const balance = parseFloat(option.dataset.balance || 0);
             const phone = option.dataset.phone || '';
+            const gst = (option.dataset.gst || '').trim();
+            const state = (option.dataset.state || '').trim();
+
             document.getElementById('custName').value = option.text.split('(')[0].trim();
             document.getElementById('custPhone').value = phone;
+
+            // Auto-detect Inter-State (IGST) if buyer GSTIN / State is outside Maharashtra (27)
+            if (state && state !== '27') {
+                setGstType(true);
+            } else if (gst && gst.length >= 2 && !gst.startsWith('27')) {
+                setGstType(true);
+            } else {
+                setGstType(false);
+            }
 
             if (balance > 0) {
                 notice.innerHTML = `⚠️ <b>Existing Credit Balance:</b> This buyer owes <b>${CURRENCY}${balance.toFixed(2)}</b> from previous purchases.`;
@@ -321,6 +385,9 @@
         const price = currentMode === 'WHOLESALE' ? parseFloat(card.dataset.wholesale) : parseFloat(card.dataset.retail);
         const stock = parseInt(card.dataset.stock);
 
+        const hsn_code = card.dataset.hsn || (card.dataset.category === 'Bags' ? '4202' : '6404');
+        const gst_rate = parseFloat(card.dataset.gstrate) || 18.0;
+
         const existing = cart.find(i => i.id === id);
         if (existing) {
             if (existing.quantity >= stock) {
@@ -334,7 +401,8 @@
                 }
             }
             cart.push({
-                id, name, sku, size, color, unit, price, cost_price, quantity: 1, max_stock: stock
+                id, name, sku, size, color, unit, price, cost_price, quantity: 1, max_stock: stock,
+                hsn_code, gst_rate
             });
         }
 
@@ -431,14 +499,34 @@
 
     function calculateTotals() {
         let subtotal = 0;
+        let taxableTotal = 0;
+        let taxTotal = 0;
+
         cart.forEach(item => {
-            subtotal += item.quantity * item.price;
+            const lineGross = item.quantity * item.price;
+            subtotal += lineGross;
+            const rate = parseFloat(item.gst_rate) || 18.0;
+            const taxable = roundTo2(lineGross / (1.0 + (rate / 100.0)));
+            taxableTotal += taxable;
+            taxTotal += (lineGross - taxable);
         });
 
         const discount = parseFloat(document.getElementById('inputDiscount').value) || 0;
         const grandTotal = Math.max(0, subtotal - discount);
 
+        if (discount > 0 && grandTotal > 0 && subtotal > 0) {
+            const ratio = grandTotal / subtotal;
+            taxableTotal = taxableTotal * ratio;
+            taxTotal = taxTotal * ratio;
+        }
+
         document.getElementById('txtSubtotal').innerText = `${CURRENCY}${subtotal.toFixed(2)}`;
+        document.getElementById('txtTaxable').innerText = `${CURRENCY}${taxableTotal.toFixed(2)}`;
+        if (isInterState) {
+            document.getElementById('txtIgst').innerText = `${CURRENCY}${taxTotal.toFixed(2)}`;
+        } else {
+            document.getElementById('txtCgstSgst').innerText = `${CURRENCY}${taxTotal.toFixed(2)}`;
+        }
         document.getElementById('txtGrandTotal').innerText = `${CURRENCY}${grandTotal.toFixed(2)}`;
 
         // Default paid amount to grand total if not manually edited or payment mode is not CREDIT
@@ -449,6 +537,10 @@
         } else if (!inputPaid.dataset.touched) {
             inputPaid.value = grandTotal.toFixed(2);
         }
+    }
+
+    function roundTo2(num) {
+        return Math.round((num + Number.EPSILON) * 100) / 100;
     }
 
     document.getElementById('paymentMode').addEventListener('change', function() {
@@ -501,6 +593,7 @@
                     grand_total: grandTotal,
                     payment_mode: paymentMode,
                     paid_amount: paidAmount,
+                    is_interstate: isInterState ? 1 : 0,
                     items: cart
                 })
             });
@@ -568,6 +661,7 @@
                     grand_total: grandTotal,
                     advance_amount: advanceAmount,
                     advance_payment_mode: advanceMode,
+                    is_interstate: isInterState ? 1 : 0,
                     items: cart
                 })
             });

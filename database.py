@@ -83,6 +83,65 @@ def init_db():
     except sqlite3.OperationalError:
         pass
 
+    # GST Compliance Columns Migration
+    gst_migrations = [
+        ("ALTER TABLE settings ADD COLUMN state_code TEXT DEFAULT '27'", "settings.state_code"),
+        ("ALTER TABLE settings ADD COLUMN state_name TEXT DEFAULT 'Maharashtra'", "settings.state_name"),
+        ("ALTER TABLE products ADD COLUMN hsn_code TEXT DEFAULT '4202'", "products.hsn_code"),
+        ("ALTER TABLE products ADD COLUMN gst_rate REAL DEFAULT 18.0", "products.gst_rate"),
+        
+        ("ALTER TABLE sales ADD COLUMN taxable_amount REAL DEFAULT 0.0", "sales.taxable_amount"),
+        ("ALTER TABLE sales ADD COLUMN cgst_amount REAL DEFAULT 0.0", "sales.cgst_amount"),
+        ("ALTER TABLE sales ADD COLUMN sgst_amount REAL DEFAULT 0.0", "sales.sgst_amount"),
+        ("ALTER TABLE sales ADD COLUMN igst_amount REAL DEFAULT 0.0", "sales.igst_amount"),
+        ("ALTER TABLE sales ADD COLUMN total_tax REAL DEFAULT 0.0", "sales.total_tax"),
+        ("ALTER TABLE sales ADD COLUMN is_interstate INTEGER DEFAULT 0", "sales.is_interstate"),
+
+        ("ALTER TABLE sale_items ADD COLUMN hsn_code TEXT DEFAULT ''", "sale_items.hsn_code"),
+        ("ALTER TABLE sale_items ADD COLUMN gst_rate REAL DEFAULT 18.0", "sale_items.gst_rate"),
+        ("ALTER TABLE sale_items ADD COLUMN taxable_amount REAL DEFAULT 0.0", "sale_items.taxable_amount"),
+        ("ALTER TABLE sale_items ADD COLUMN cgst_amount REAL DEFAULT 0.0", "sale_items.cgst_amount"),
+        ("ALTER TABLE sale_items ADD COLUMN sgst_amount REAL DEFAULT 0.0", "sale_items.sgst_amount"),
+        ("ALTER TABLE sale_items ADD COLUMN igst_amount REAL DEFAULT 0.0", "sale_items.igst_amount"),
+        ("ALTER TABLE sale_items ADD COLUMN tax_amount REAL DEFAULT 0.0", "sale_items.tax_amount"),
+
+        ("ALTER TABLE purchases ADD COLUMN taxable_amount REAL DEFAULT 0.0", "purchases.taxable_amount"),
+        ("ALTER TABLE purchases ADD COLUMN cgst_amount REAL DEFAULT 0.0", "purchases.cgst_amount"),
+        ("ALTER TABLE purchases ADD COLUMN sgst_amount REAL DEFAULT 0.0", "purchases.sgst_amount"),
+        ("ALTER TABLE purchases ADD COLUMN igst_amount REAL DEFAULT 0.0", "purchases.igst_amount"),
+        ("ALTER TABLE purchases ADD COLUMN total_tax REAL DEFAULT 0.0", "purchases.total_tax"),
+        ("ALTER TABLE purchases ADD COLUMN is_interstate INTEGER DEFAULT 0", "purchases.is_interstate"),
+
+        ("ALTER TABLE purchase_items ADD COLUMN hsn_code TEXT DEFAULT ''", "purchase_items.hsn_code"),
+        ("ALTER TABLE purchase_items ADD COLUMN gst_rate REAL DEFAULT 18.0", "purchase_items.gst_rate"),
+        ("ALTER TABLE purchase_items ADD COLUMN taxable_amount REAL DEFAULT 0.0", "purchase_items.taxable_amount"),
+        ("ALTER TABLE purchase_items ADD COLUMN tax_amount REAL DEFAULT 0.0", "purchase_items.tax_amount"),
+
+        ("ALTER TABLE estimates ADD COLUMN taxable_amount REAL DEFAULT 0.0", "estimates.taxable_amount"),
+        ("ALTER TABLE estimates ADD COLUMN cgst_amount REAL DEFAULT 0.0", "estimates.cgst_amount"),
+        ("ALTER TABLE estimates ADD COLUMN sgst_amount REAL DEFAULT 0.0", "estimates.sgst_amount"),
+        ("ALTER TABLE estimates ADD COLUMN igst_amount REAL DEFAULT 0.0", "estimates.igst_amount"),
+        ("ALTER TABLE estimates ADD COLUMN total_tax REAL DEFAULT 0.0", "estimates.total_tax"),
+        ("ALTER TABLE estimates ADD COLUMN is_interstate INTEGER DEFAULT 0", "estimates.is_interstate"),
+
+        ("ALTER TABLE estimate_items ADD COLUMN hsn_code TEXT DEFAULT ''", "estimate_items.hsn_code"),
+        ("ALTER TABLE estimate_items ADD COLUMN gst_rate REAL DEFAULT 18.0", "estimate_items.gst_rate"),
+        ("ALTER TABLE estimate_items ADD COLUMN taxable_amount REAL DEFAULT 0.0", "estimate_items.taxable_amount"),
+        ("ALTER TABLE estimate_items ADD COLUMN tax_amount REAL DEFAULT 0.0", "estimate_items.tax_amount"),
+
+        ("ALTER TABLE parties ADD COLUMN state_code TEXT DEFAULT '27'", "parties.state_code"),
+        ("ALTER TABLE parties ADD COLUMN state_name TEXT DEFAULT 'Maharashtra'", "parties.state_name"),
+    ]
+    for sql_query, col in gst_migrations:
+        try:
+            cursor.execute(sql_query)
+        except sqlite3.OperationalError:
+            pass
+
+    # Ensure standard Indian HSN codes & GST rates are assigned to catalog
+    cursor.execute("UPDATE products SET hsn_code = '4202', gst_rate = 18.0 WHERE category = 'Bags' AND (hsn_code IS NULL OR hsn_code = '' OR hsn_code = '4202')")
+    cursor.execute("UPDATE products SET hsn_code = '6404', gst_rate = 18.0 WHERE category = 'Shoes' AND (hsn_code IS NULL OR hsn_code = '' OR hsn_code = '4202')")
+
     # Ensure shop name is updated to SSIPL
     cursor.execute("UPDATE settings SET shop_name = 'SSIPL Bags & Footwear Hub' WHERE shop_name = 'Apex Footwear & Bags Hub'")
     cursor.execute("UPDATE users SET full_name = 'Sales Staff 1' WHERE username = 'sales1' AND full_name = 'Floor Salesman'")

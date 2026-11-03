@@ -1,0 +1,272 @@
+{% extends "base.html" %}
+
+{% block title %}GST Reports & Tax Filing (GSTR-1 & GSTR-3B){% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+
+    <!-- Top Page Header & Export Action -->
+    <div class="bg-gradient-to-r from-purple-900 via-indigo-900 to-slate-900 text-white rounded-3xl p-6 sm:p-8 shadow-xl relative overflow-hidden">
+        <div class="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
+            <div>
+                <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-purple-500/20 text-purple-200 border border-purple-400/30 text-xs font-semibold uppercase tracking-wider mb-2">
+                    <i data-lucide="shield-check" class="w-3.5 h-3.5 text-purple-300"></i> Indian GST Law & HSN Compliant
+                </div>
+                <h1 class="text-2xl sm:text-3xl font-black tracking-tight text-white">GST Reports & Tax Returns</h1>
+                <p class="text-purple-200 text-xs sm:text-sm mt-1 max-w-xl">
+                    Generate CA-ready GSTR-1 Excel returns, review Table 12 HSN summaries, and track monthly GSTR-3B tax liabilities and Input Tax Credit (ITC).
+                </p>
+                <div class="mt-3 flex flex-wrap gap-4 text-xs text-purple-200/90 font-mono">
+                    <span>GSTIN: <b class="text-white">{{ settings.tax_number or '27AAAAA0000A1Z5' }}</b></span>
+                    <span>State: <b class="text-white">{{ settings.state_name or 'Maharashtra' }} (Code: {{ settings.state_code or '27' }})</b></span>
+                </div>
+            </div>
+
+            <!-- Download GSTR-1 Excel Return Button -->
+            <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+                <a href="{{ url_for('export_gstr1', start_date=start_date, end_date=end_date) }}"
+                   class="inline-flex items-center justify-center gap-2.5 px-6 py-3.5 rounded-2xl bg-emerald-500 hover:bg-emerald-600 text-white font-black text-sm shadow-lg shadow-emerald-500/30 transition transform hover:-translate-y-0.5">
+                    <i data-lucide="file-spreadsheet" class="w-5 h-5"></i>
+                    Download GSTR-1 Return (.xlsx)
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Date Range Filter Toolbar -->
+    <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
+        <form method="GET" action="{{ url_for('gst_reports') }}" class="flex flex-wrap items-center justify-between gap-4">
+            <div class="flex flex-wrap items-center gap-3 text-xs">
+                <div class="flex items-center gap-1.5 font-bold text-slate-700">
+                    <i data-lucide="calendar" class="w-4 h-4 text-indigo-600"></i> Period:
+                </div>
+                <div class="flex items-center gap-2">
+                    <label class="text-slate-500 font-medium">From:</label>
+                    <input type="date" name="start_date" value="{{ start_date }}" class="px-3 py-1.5 bg-slate-50 border border-slate-300 rounded-lg text-xs font-semibold">
+                </div>
+                <div class="flex items-center gap-2">
+                    <label class="text-slate-500 font-medium">To:</label>
+                    <input type="date" name="end_date" value="{{ end_date }}" class="px-3 py-1.5 bg-slate-50 border border-slate-300 rounded-lg text-xs font-semibold">
+                </div>
+                <button type="submit" class="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold text-xs shadow-xs transition">
+                    Filter Reports
+                </button>
+            </div>
+
+            <div class="flex items-center gap-2 text-xs">
+                <a href="{{ url_for('gst_reports') }}" class="text-slate-500 hover:text-indigo-600 underline font-medium">
+                    Reset to Current Month
+                </a>
+            </div>
+        </form>
+    </div>
+
+    <!-- GSTR-3B Tax Liability & Input Tax Credit (ITC) Summary Cards -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
+        
+        <!-- 1. Outward Supplies (Output Tax from Sales) -->
+        <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
+            <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+                <div class="flex items-center gap-2">
+                    <div class="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold">
+                        <i data-lucide="trending-up" class="w-4 h-4"></i>
+                    </div>
+                    <div>
+                        <h3 class="font-bold text-sm text-slate-900 leading-tight">Output GST (Sales)</h3>
+                        <p class="text-[11px] text-slate-400">Total Tax Collected from Customers</p>
+                    </div>
+                </div>
+                <span class="text-xs font-mono font-bold bg-slate-100 px-2 py-0.5 rounded text-slate-600">
+                    {{ summary.sales_count }} Bills
+                </span>
+            </div>
+
+            <div class="mt-4 space-y-2 text-xs text-slate-600">
+                <div class="flex justify-between">
+                    <span>Taxable Turnover:</span>
+                    <span class="font-bold text-slate-800">{{ settings.currency_symbol }}{{ "{:,.2f}".format(summary.taxable_sales) }}</span>
+                </div>
+                <div class="flex justify-between">
+                    <span>CGST (Central Tax):</span>
+                    <span class="font-semibold text-slate-700">{{ settings.currency_symbol }}{{ "{:,.2f}".format(summary.cgst_output) }}</span>
+                </div>
+                <div class="flex justify-between">
+                    <span>SGST (State Tax):</span>
+                    <span class="font-semibold text-slate-700">{{ settings.currency_symbol }}{{ "{:,.2f}".format(summary.sgst_output) }}</span>
+                </div>
+                <div class="flex justify-between">
+                    <span>IGST (Integrated Tax):</span>
+                    <span class="font-semibold text-slate-700">{{ settings.currency_symbol }}{{ "{:,.2f}".format(summary.igst_output) }}</span>
+                </div>
+                <div class="pt-2 border-t border-slate-100 flex justify-between font-black text-sm text-emerald-700">
+                    <span>Total Output Tax:</span>
+                    <span>{{ settings.currency_symbol }}{{ "{:,.2f}".format(summary.total_output_tax) }}</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 2. Inward Supplies (Input Tax Credit / ITC from Purchases) -->
+        <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
+            <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+                <div class="flex items-center gap-2">
+                    <div class="w-8 h-8 rounded-lg bg-sky-100 text-sky-700 flex items-center justify-center font-bold">
+                        <i data-lucide="truck" class="w-4 h-4"></i>
+                    </div>
+                    <div>
+                        <h3 class="font-bold text-sm text-slate-900 leading-tight">Eligible ITC (Purchases)</h3>
+                        <p class="text-[11px] text-slate-400">Input Tax Credit Paid to Suppliers</p>
+                    </div>
+                </div>
+                <span class="text-xs font-mono font-bold bg-slate-100 px-2 py-0.5 rounded text-slate-600">
+                    {{ summary.purchases_count }} Invoices
+                </span>
+            </div>
+
+            <div class="mt-4 space-y-2 text-xs text-slate-600">
+                <div class="flex justify-between">
+                    <span>Taxable Purchases:</span>
+                    <span class="font-bold text-slate-800">{{ settings.currency_symbol }}{{ "{:,.2f}".format(summary.taxable_purchases) }}</span>
+                </div>
+                <div class="flex justify-between">
+                    <span>CGST Credit:</span>
+                    <span class="font-semibold text-slate-700">{{ settings.currency_symbol }}{{ "{:,.2f}".format(summary.cgst_itc) }}</span>
+                </div>
+                <div class="flex justify-between">
+                    <span>SGST Credit:</span>
+                    <span class="font-semibold text-slate-700">{{ settings.currency_symbol }}{{ "{:,.2f}".format(summary.sgst_itc) }}</span>
+                </div>
+                <div class="flex justify-between">
+                    <span>IGST Credit:</span>
+                    <span class="font-semibold text-slate-700">{{ settings.currency_symbol }}{{ "{:,.2f}".format(summary.igst_itc) }}</span>
+                </div>
+                <div class="pt-2 border-t border-slate-100 flex justify-between font-black text-sm text-sky-700">
+                    <span>Total Input Tax Credit:</span>
+                    <span>{{ settings.currency_symbol }}{{ "{:,.2f}".format(summary.total_itc) }}</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 3. Net Tax Payable (Output Tax - ITC) -->
+        <div class="bg-white p-5 rounded-2xl border-2 {% if summary.net_tax_payable > 0 %}border-amber-400/80 bg-gradient-to-b from-amber-50/40 to-white{% else %}border-emerald-300 bg-gradient-to-b from-emerald-50/40 to-white{% endif %} shadow-xs">
+            <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+                <div class="flex items-center gap-2">
+                    <div class="w-8 h-8 rounded-lg {% if summary.net_tax_payable > 0 %}bg-amber-100 text-amber-800{% else %}bg-emerald-100 text-emerald-800{% endif %} flex items-center justify-center font-bold">
+                        <i data-lucide="scale" class="w-4 h-4"></i>
+                    </div>
+                    <div>
+                        <h3 class="font-bold text-sm text-slate-900 leading-tight">Net GST Payable (GSTR-3B)</h3>
+                        <p class="text-[11px] text-slate-400">Output Tax minus Input Tax Credit</p>
+                    </div>
+                </div>
+                <span class="text-xs font-black uppercase px-2 py-0.5 rounded {% if summary.net_tax_payable > 0 %}bg-amber-100 text-amber-800{% else %}bg-emerald-100 text-emerald-800{% endif %}">
+                    {% if summary.net_tax_payable > 0 %}Payable{% else %}Credit Surplus{% endif %}
+                </span>
+            </div>
+
+            <div class="mt-4 space-y-2 text-xs text-slate-600">
+                <div class="flex justify-between">
+                    <span>Net CGST Payable:</span>
+                    <span class="font-semibold text-slate-800">{{ settings.currency_symbol }}{{ "{:,.2f}".format(summary.net_cgst_payable) }}</span>
+                </div>
+                <div class="flex justify-between">
+                    <span>Net SGST Payable:</span>
+                    <span class="font-semibold text-slate-800">{{ settings.currency_symbol }}{{ "{:,.2f}".format(summary.net_sgst_payable) }}</span>
+                </div>
+                <div class="flex justify-between">
+                    <span>Net IGST Payable:</span>
+                    <span class="font-semibold text-slate-800">{{ settings.currency_symbol }}{{ "{:,.2f}".format(summary.net_igst_payable) }}</span>
+                </div>
+                <div class="pt-2 border-t border-slate-200/80 flex justify-between font-black text-base {% if summary.net_tax_payable > 0 %}text-amber-800{% else %}text-emerald-700{% endif %}">
+                    <span>Net Amount to Pay:</span>
+                    <span>{{ settings.currency_symbol }}{{ "{:,.2f}".format(summary.net_tax_payable) }}</span>
+                </div>
+                <p class="text-[10px] text-slate-400 italic text-right mt-1">Payable by 20th of next month on GST portal</p>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Table 12 HSN Summary (Bags & Footwear) -->
+    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div class="p-5 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+                <h3 class="font-bold text-base text-slate-900 flex items-center gap-2">
+                    <i data-lucide="layers" class="w-5 h-5 text-indigo-600"></i>
+                    Table 12: HSN Wise Outward Supplies Summary
+                </h3>
+                <p class="text-xs text-slate-500 mt-0.5">Mandatory summary required by Indian GST laws for all business tax returns.</p>
+            </div>
+            <a href="{{ url_for('export_gstr1', start_date=start_date, end_date=end_date) }}"
+               class="text-xs font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-1.5 self-start sm:self-auto">
+                <i data-lucide="download" class="w-4 h-4"></i> Export HSN Sheet
+            </a>
+        </div>
+
+        <div class="overflow-x-auto">
+            <table class="w-full text-left text-xs">
+                <thead class="bg-slate-50 border-b border-slate-200 uppercase font-bold text-[11px] text-slate-600">
+                    <tr>
+                        <th class="py-3 px-4">HSN Code</th>
+                        <th class="py-3 px-4">Description</th>
+                        <th class="py-3 px-4 text-center">UQC (Unit)</th>
+                        <th class="py-3 px-4 text-center">Total Quantity</th>
+                        <th class="py-3 px-4 text-right">Taxable Value</th>
+                        <th class="py-3 px-4 text-right">Central Tax (CGST)</th>
+                        <th class="py-3 px-4 text-right">State Tax (SGST)</th>
+                        <th class="py-3 px-4 text-right">Integrated Tax (IGST)</th>
+                        <th class="py-3 px-4 text-right">Total Tax Amount</th>
+                        <th class="py-3 px-4 text-right">Total Gross Value</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100">
+                    {% for h in summary.hsn_rows %}
+                    <tr class="hover:bg-slate-50 transition">
+                        <td class="py-3 px-4 font-mono font-bold text-indigo-700 text-sm">
+                            {{ h.hsn }}
+                        </td>
+                        <td class="py-3 px-4 font-medium text-slate-700">
+                            {% if h.hsn == '4202' %}
+                            Trunks, suitcases, bags, backpacks, handbags, wallets
+                            {% elif h.hsn == '6404' or h.hsn == '6403' %}
+                            Footwear, running shoes, formal footwear, sandals
+                            {% else %}
+                            Product Supplies (HSN {{ h.hsn }})
+                            {% endif %}
+                        </td>
+                        <td class="py-3 px-4 text-center font-semibold text-slate-600">{{ h.uqc }}</td>
+                        <td class="py-3 px-4 text-center font-bold text-slate-900">{{ h.tot_qty }}</td>
+                        <td class="py-3 px-4 text-right font-medium text-slate-700">{{ settings.currency_symbol }}{{ "{:,.2f}".format(h.tot_taxable) }}</td>
+                        <td class="py-3 px-4 text-right text-slate-600">{{ settings.currency_symbol }}{{ "{:,.2f}".format(h.tot_cgst or 0) }}</td>
+                        <td class="py-3 px-4 text-right text-slate-600">{{ settings.currency_symbol }}{{ "{:,.2f}".format(h.tot_sgst or 0) }}</td>
+                        <td class="py-3 px-4 text-right text-slate-600">{{ settings.currency_symbol }}{{ "{:,.2f}".format(h.tot_igst or 0) }}</td>
+                        <td class="py-3 px-4 text-right font-bold text-indigo-700">{{ settings.currency_symbol }}{{ "{:,.2f}".format(h.tot_tax) }}</td>
+                        <td class="py-3 px-4 text-right font-black text-slate-900">{{ settings.currency_symbol }}{{ "{:,.2f}".format(h.tot_val) }}</td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="10" class="py-8 text-center text-slate-400 font-medium">
+                            No sales recorded for the selected date period.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- CA & Auditor Return Instructions Guide -->
+    <div class="bg-slate-50 border border-slate-200 rounded-2xl p-5 text-xs text-slate-600 space-y-2">
+        <h4 class="font-bold text-slate-800 text-sm flex items-center gap-1.5">
+            <i data-lucide="help-circle" class="w-4 h-4 text-sky-600"></i> How to submit this GST Return to your CA or GST Portal:
+        </h4>
+        <ul class="list-disc pl-5 space-y-1 text-slate-600">
+            <li>Click the green <b>Download GSTR-1 Return (.xlsx)</b> button above to download the CA-ready spreadsheet.</li>
+            <li>Send the downloaded Excel file directly to your Chartered Accountant or tax consultant via WhatsApp or email.</li>
+            <li>The file already contains <b>4 separated sheets</b> formatted exactly according to GST portal rules:
+                <b>Overview</b>, <b>Table 4 (B2B wholesale sales with buyer GSTIN)</b>, <b>Table 7 (B2C retail cash memos)</b>, and <b>Table 12 (HSN code wise quantities & tax)</b>.</li>
+            <li>For monthly <b>GSTR-3B</b> filing, refer to the three summary cards above for your Output Tax, Input Tax Credit (ITC), and Net GST Payable.</li>
+        </ul>
+    </div>
+
+</div>
+{% endblock %}

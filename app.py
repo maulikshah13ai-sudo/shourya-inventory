@@ -295,6 +295,13 @@ def add_product():
         min_alert_qty = int(request.form.get('min_alert_qty', 5))
         location = request.form.get('location', '')
         notes = request.form.get('notes', '')
+        hsn_code = request.form.get('hsn_code', '').strip()
+        if not hsn_code:
+            hsn_code = '4202' if category == 'Bags' else '6404'
+        try:
+            gst_rate = float(request.form.get('gst_rate', 18.0))
+        except (ValueError, TypeError):
+            gst_rate = 18.0
 
         # Auto-generate SKU if empty
         if not sku:
@@ -305,10 +312,10 @@ def add_product():
 
         cur.execute("""
             INSERT INTO products (sku, name, category, subcategory, brand, size, color, unit, 
-                                  cost_price, wholesale_price, retail_price, stock_qty, min_alert_qty, location, notes)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                  cost_price, wholesale_price, retail_price, stock_qty, min_alert_qty, location, notes, hsn_code, gst_rate)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (sku, name, category, subcategory, brand, size, color, unit,
-              cost_price, wholesale_price, retail_price, stock_qty, min_alert_qty, location, notes))
+              cost_price, wholesale_price, retail_price, stock_qty, min_alert_qty, location, notes, hsn_code, gst_rate))
 
         prod_id = cur.lastrowid
         if stock_qty > 0:
@@ -349,6 +356,13 @@ def edit_product(product_id):
         min_alert_qty = int(request.form.get('min_alert_qty', 5))
         location = request.form.get('location', '')
         notes = request.form.get('notes', '')
+        hsn_code = request.form.get('hsn_code', '').strip()
+        if not hsn_code:
+            hsn_code = '4202' if category == 'Bags' else '6404'
+        try:
+            gst_rate = float(request.form.get('gst_rate', 18.0))
+        except (ValueError, TypeError):
+            gst_rate = 18.0
 
         cur.execute("SELECT stock_qty FROM products WHERE id = ?", (product_id,))
         old_stock = cur.fetchone()[0]
@@ -357,10 +371,11 @@ def edit_product(product_id):
             UPDATE products 
             SET name=?, category=?, subcategory=?, brand=?, size=?, color=?, unit=?,
                 cost_price=?, wholesale_price=?, retail_price=?, stock_qty=?, min_alert_qty=?, location=?, notes=?,
-                updated_at=CURRENT_TIMESTAMP
+                hsn_code=?, gst_rate=?, updated_at=CURRENT_TIMESTAMP
             WHERE id=?
         """, (name, category, subcategory, brand, size, color, unit,
-              cost_price, wholesale_price, retail_price, stock_qty, min_alert_qty, location, notes, product_id))
+              cost_price, wholesale_price, retail_price, stock_qty, min_alert_qty, location, notes,
+              hsn_code, gst_rate, product_id))
 
         if stock_qty != old_stock:
             diff = stock_qty - old_stock
@@ -458,11 +473,78 @@ def create_sale():
         payment_mode = data.get('payment_mode', 'CASH').upper()
         notes = data.get('notes', '')
 
-        subtotal = float(data.get('subtotal', 0))
+        # Determine Interstate (IGST) vs Intra-State (CGST + SGST)
+        is_interstate = int(data.get('is_interstate', 0))
+        cur.execute("SELECT state_code FROM settings LIMIT 1")
+        s_row = cur.fetchone()
+        shop_sc = (s_row['state_code'] if s_row and s_row['state_code'] else '27').strip()
+
+        if party_id:
+            cur.execute("SELECT state_code, gst_no FROM parties WHERE id = ?", (party_id,))
+            p_row = cur.fetchone()
+            if p_row:
+                party_sc = (p_row['state_code'] or '').strip()
+                if not party_sc and p_row['gst_no'] and len(p_row['gst_no'].strip()) >= 2:
+                    party_sc = p_row['gst_no'].strip()[:2]
+                if party_sc and party_sc != shop_sc:
+                    is_interstate = 1
+
+        # Enrich line items with catalog HSN and GST rate
+        enriched_items = []
+        for item in data['items']:
+            prod_id = item['id']
+            qty = int(item['quantity'])
+            price = float(item['price'])
+
+            cur.execute("SELECT stock_qty, cost_price, name, sku, size, color, unit, category, hsn_code, gst_rate FROM products WHERE id = ?", (prod_id,))
+            prod = cur.fetchone()
+            if not prod:
+                raise Exception(f"Product ID {prod_id} not found!")
+
+            cat = prod['category'] or 'Bags'
+            default_hsn = '4202' if 'bag' in cat.lower() else '6404'
+            hsn = str(prod['hsn_code'] or default_hsn).strip() or default_hsn
+            gst_rate = float(prod['gst_rate'] if prod['gst_rate'] is not None else 18.0)
+
+            enriched_items.append({
+                'id': prod_id,
+                'name': prod['name'],
+                'sku': prod['sku'],
+                'size': prod['size'],
+                'color': prod['color'],
+                'unit': prod['unit'] or ('Pieces' if cat == 'Bags' else 'Pairs'),
+                'quantity': qty,
+                'unit_price': price,
+                'price': price,
+                'cost_price': prod['cost_price'],
+                'stock_qty': prod['stock_qty'],
+                'hsn_code': hsn,
+                'gst_rate': gst_rate
+            })
+
+        # Calculate GST Breakdown compliant with Indian GST laws
+        gst_calc = excel_helpers.calculate_gst_breakdown(enriched_items, is_interstate=bool(is_interstate), prices_include_gst=True)
+
+        subtotal = float(data.get('subtotal', gst_calc['grand_total']))
         discount = float(data.get('discount', 0))
-        grand_total = float(data.get('grand_total', 0))
+        grand_total = float(data.get('grand_total', max(0.0, subtotal - discount)))
         paid_amount = float(data.get('paid_amount', grand_total))
         balance_amount = max(0.0, grand_total - paid_amount)
+
+        taxable_amount = gst_calc['taxable_total']
+        cgst_amount = gst_calc['cgst_total']
+        sgst_amount = gst_calc['sgst_total']
+        igst_amount = gst_calc['igst_total']
+        total_tax = gst_calc['total_tax']
+
+        # Adjust tax proportionally if bill discount was applied
+        if discount > 0 and grand_total > 0 and subtotal > 0:
+            ratio = grand_total / subtotal
+            taxable_amount = round(taxable_amount * ratio, 2)
+            cgst_amount = round(cgst_amount * ratio, 2)
+            sgst_amount = round(sgst_amount * ratio, 2)
+            igst_amount = round(igst_amount * ratio, 2)
+            total_tax = round(cgst_amount + sgst_amount + igst_amount, 2)
 
         if balance_amount > 0:
             payment_status = 'PARTIAL' if paid_amount > 0 else 'CREDIT'
@@ -480,40 +562,36 @@ def create_sale():
         salesman_id = session.get('user_id')
         salesman_name = session.get('full_name') or session.get('username') or 'Staff'
 
-        # Insert Sale record
+        # Insert Sale record with full GST compliance breakdown
         cur.execute("""
             INSERT INTO sales (invoice_no, sale_type, party_id, customer_name, customer_phone, 
                                subtotal, discount, grand_total, payment_mode, payment_status, 
-                               paid_amount, balance_amount, notes, salesman_id, salesman_name)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                               paid_amount, balance_amount, notes, salesman_id, salesman_name,
+                               taxable_amount, cgst_amount, sgst_amount, igst_amount, total_tax, is_interstate)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (invoice_no, sale_type, party_id, customer_name, customer_phone,
               subtotal, discount, grand_total, payment_mode, payment_status,
-              paid_amount, balance_amount, notes, salesman_id, salesman_name))
+              paid_amount, balance_amount, notes, salesman_id, salesman_name,
+              taxable_amount, cgst_amount, sgst_amount, igst_amount, total_tax, is_interstate))
         sale_id = cur.lastrowid
 
-        # Insert Sale Items & Deduct Stock
-        for item in data['items']:
+        # Insert Sale Items with HSN & GST Breakdown & Deduct Physical Stock
+        for item in gst_calc['items']:
             prod_id = item['id']
-            qty = int(item['quantity'])
-            price = float(item['price'])
-            item_total = qty * price
-
-            cur.execute("SELECT stock_qty, cost_price, name, sku, size, color, unit FROM products WHERE id = ?", (prod_id,))
-            prod = cur.fetchone()
-            if not prod:
-                raise Exception(f"Product ID {prod_id} not found!")
-
-            current_stock = prod['stock_qty']
-            cost_price = prod['cost_price']
-            new_stock = current_stock - qty
+            qty = item['quantity']
+            new_stock = item['stock_qty'] - qty
 
             # Deduct stock
             cur.execute("UPDATE products SET stock_qty = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (new_stock, prod_id))
 
             cur.execute("""
-                INSERT INTO sale_items (sale_id, product_id, product_name, sku, size, color, unit, quantity, unit_price, cost_price, total_price)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (sale_id, prod_id, prod['name'], prod['sku'], prod['size'], prod['color'], prod['unit'], qty, price, cost_price, item_total))
+                INSERT INTO sale_items (sale_id, product_id, product_name, sku, size, color, unit, quantity, unit_price, cost_price, total_price,
+                                        hsn_code, gst_rate, taxable_amount, cgst_amount, sgst_amount, igst_amount, tax_amount)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (sale_id, prod_id, item['name'], item['sku'], item['size'], item['color'], item['unit'],
+                  qty, item['unit_price'], item['cost_price'], item['total_price'],
+                  item['hsn_code'], item['gst_rate'], item['taxable_amount'],
+                  item['cgst_amount'], item['sgst_amount'], item['igst_amount'], item['tax_amount']))
 
             cur.execute("""
                 INSERT INTO stock_logs (product_id, change_type, quantity_change, stock_after, reference_no, reason)
@@ -583,35 +661,71 @@ def create_purchase():
             count = cur.execute("SELECT COUNT(*) FROM purchases").fetchone()[0] + 1
             invoice_no = f"PUR-{datetime.now().strftime('%Y%m')}-{count:04d}"
 
-        total_amount = sum(float(item['quantity']) * float(item['unit_cost']) for item in data['items'])
+        cur.execute("SELECT state_code FROM settings LIMIT 1")
+        s_row = cur.fetchone()
+        shop_sc = (s_row['state_code'] if s_row and s_row['state_code'] else '27').strip()
 
-        cur.execute("SELECT id FROM parties WHERE name = ? AND party_type = 'SUPPLIER'", (supplier_name,))
+        cur.execute("SELECT id, state_code, gst_no FROM parties WHERE name = ? AND party_type = 'SUPPLIER'", (supplier_name,))
         sup_row = cur.fetchone()
+        is_interstate = int(data.get('is_interstate', 0))
         if sup_row:
-            supplier_id = sup_row[0]
+            supplier_id = sup_row['id']
+            sup_sc = (sup_row['state_code'] or '').strip()
+            if not sup_sc and sup_row['gst_no'] and len(sup_row['gst_no'].strip()) >= 2:
+                sup_sc = sup_row['gst_no'].strip()[:2]
+            if sup_sc and sup_sc != shop_sc:
+                is_interstate = 1
         else:
             cur.execute("INSERT INTO parties (name, party_type) VALUES (?, 'SUPPLIER')", (supplier_name,))
             supplier_id = cur.lastrowid
 
-        cur.execute("""
-            INSERT INTO purchases (invoice_no, supplier_id, supplier_name, purchase_date, total_amount, paid_amount, payment_status, notes)
-            VALUES (?, ?, ?, ?, ?, ?, 'PAID', ?)
-        """, (invoice_no, supplier_id, supplier_name, purchase_date, total_amount, total_amount, notes))
-        purchase_id = cur.lastrowid
-
+        # Enrich line items with catalog HSN and GST rate
+        enriched_items = []
         for item in data['items']:
             prod_id = item['id']
             qty = int(item['quantity'])
             unit_cost = float(item['unit_cost'])
-            tot_cost = qty * unit_cost
 
-            cur.execute("SELECT stock_qty FROM products WHERE id = ?", (prod_id,))
+            cur.execute("SELECT stock_qty, name, sku, category, hsn_code, gst_rate, unit FROM products WHERE id = ?", (prod_id,))
             prod = cur.fetchone()
             if not prod:
                 raise Exception(f"Product {prod_id} not found")
 
-            old_stock = prod['stock_qty']
-            new_stock = old_stock + qty
+            cat = prod['category'] or 'Bags'
+            default_hsn = '4202' if 'bag' in cat.lower() else '6404'
+            hsn = str(prod['hsn_code'] or default_hsn).strip() or default_hsn
+            gst_rate = float(prod['gst_rate'] if prod['gst_rate'] is not None else 18.0)
+
+            enriched_items.append({
+                'id': prod_id,
+                'name': prod['name'],
+                'sku': prod['sku'],
+                'unit': prod['unit'] or ('Pieces' if cat == 'Bags' else 'Pairs'),
+                'quantity': qty,
+                'unit_cost': unit_cost,
+                'price': unit_cost,
+                'stock_qty': prod['stock_qty'],
+                'hsn_code': hsn,
+                'gst_rate': gst_rate
+            })
+
+        gst_calc = excel_helpers.calculate_gst_breakdown(enriched_items, is_interstate=bool(is_interstate), prices_include_gst=True)
+        total_amount = gst_calc['grand_total']
+
+        cur.execute("""
+            INSERT INTO purchases (invoice_no, supplier_id, supplier_name, purchase_date, total_amount, paid_amount, payment_status, notes,
+                                   taxable_amount, cgst_amount, sgst_amount, igst_amount, total_tax, is_interstate)
+            VALUES (?, ?, ?, ?, ?, ?, 'PAID', ?, ?, ?, ?, ?, ?, ?)
+        """, (invoice_no, supplier_id, supplier_name, purchase_date, total_amount, total_amount, notes,
+              gst_calc['taxable_total'], gst_calc['cgst_total'], gst_calc['sgst_total'], gst_calc['igst_total'], gst_calc['total_tax'], is_interstate))
+        purchase_id = cur.lastrowid
+
+        for item in gst_calc['items']:
+            prod_id = item['id']
+            qty = item['quantity']
+            unit_cost = item['unit_cost']
+            tot_cost = item['total_price']
+            new_stock = item['stock_qty'] + qty
 
             cur.execute("""
                 UPDATE products 
@@ -620,9 +734,11 @@ def create_purchase():
             """, (new_stock, unit_cost, prod_id))
 
             cur.execute("""
-                INSERT INTO purchase_items (purchase_id, product_id, quantity, unit_cost, total_cost)
-                VALUES (?, ?, ?, ?, ?)
-            """, (purchase_id, prod_id, qty, unit_cost, tot_cost))
+                INSERT INTO purchase_items (purchase_id, product_id, quantity, unit_cost, total_cost,
+                                            hsn_code, gst_rate, taxable_amount, tax_amount)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (purchase_id, prod_id, qty, unit_cost, tot_cost,
+                  item['hsn_code'], item['gst_rate'], item['taxable_amount'], item['tax_amount']))
 
             cur.execute("""
                 INSERT INTO stock_logs (product_id, change_type, quantity_change, stock_after, reference_no, reason)
@@ -686,10 +802,13 @@ def upload_bulk_purchases_excel():
         total_purchase_val = 0.0
 
         for (sup_name, inv_no, p_date), items in grouped_purchases.items():
-            cur.execute("SELECT id FROM parties WHERE name = ? AND party_type = 'SUPPLIER'", (sup_name,))
+            cur.execute("SELECT id, state_code, gst_no FROM parties WHERE name = ? AND party_type = 'SUPPLIER'", (sup_name,))
             s_row = cur.fetchone()
+            is_interstate = 0
             if s_row:
-                supplier_id = s_row[0]
+                supplier_id = s_row['id']
+                if s_row['gst_no'] and len(s_row['gst_no'].strip()) >= 2 and s_row['gst_no'].strip()[:2] != '27':
+                    is_interstate = 1
             else:
                 cur.execute("INSERT INTO parties (name, party_type) VALUES (?, 'SUPPLIER')", (sup_name,))
                 supplier_id = cur.lastrowid
@@ -699,28 +818,40 @@ def upload_bulk_purchases_excel():
                 count = cur.execute("SELECT COUNT(*) FROM purchases").fetchone()[0] + 1
                 final_inv_no = f"PUR-{datetime.now().strftime('%Y%m')}-{count:04d}"
 
-            shipment_total = sum(it['quantity'] * it['cost_price'] for it in items)
+            # Compute GST breakdown for this purchase batch
+            gst_calc = excel_helpers.calculate_gst_breakdown(items, is_interstate=bool(is_interstate), prices_include_gst=True)
+            shipment_total = gst_calc['grand_total']
             total_purchase_val += shipment_total
 
             cur.execute("SELECT id FROM purchases WHERE invoice_no = ?", (final_inv_no,))
             existing_pur = cur.fetchone()
             if existing_pur:
                 purchase_id = existing_pur[0]
-                cur.execute("UPDATE purchases SET total_amount = total_amount + ?, paid_amount = paid_amount + ? WHERE id = ?",
-                            (shipment_total, shipment_total, purchase_id))
+                cur.execute("""
+                    UPDATE purchases 
+                    SET total_amount = total_amount + ?, paid_amount = paid_amount + ?,
+                        taxable_amount = taxable_amount + ?, cgst_amount = cgst_amount + ?,
+                        sgst_amount = sgst_amount + ?, igst_amount = igst_amount + ?,
+                        total_tax = total_tax + ?
+                    WHERE id = ?
+                """, (shipment_total, shipment_total, gst_calc['taxable_total'],
+                      gst_calc['cgst_total'], gst_calc['sgst_total'], gst_calc['igst_total'],
+                      gst_calc['total_tax'], purchase_id))
             else:
                 cur.execute("""
-                    INSERT INTO purchases (invoice_no, supplier_id, supplier_name, purchase_date, total_amount, paid_amount, payment_status, notes)
-                    VALUES (?, ?, ?, ?, ?, ?, 'PAID', ?)
-                """, (final_inv_no, supplier_id, sup_name, p_date, shipment_total, shipment_total, "Imported via Excel Bulk Upload"))
+                    INSERT INTO purchases (invoice_no, supplier_id, supplier_name, purchase_date, total_amount, paid_amount, payment_status, notes,
+                                           taxable_amount, cgst_amount, sgst_amount, igst_amount, total_tax, is_interstate)
+                    VALUES (?, ?, ?, ?, ?, ?, 'PAID', ?, ?, ?, ?, ?, ?, ?)
+                """, (final_inv_no, supplier_id, sup_name, p_date, shipment_total, shipment_total, "Imported via Excel Bulk Upload",
+                      gst_calc['taxable_total'], gst_calc['cgst_total'], gst_calc['sgst_total'], gst_calc['igst_total'], gst_calc['total_tax'], is_interstate))
                 purchase_id = cur.lastrowid
                 total_invoices_created += 1
 
-            for it in items:
+            for it in gst_calc['items']:
                 sku = it['sku']
                 qty = it['quantity']
                 cost = it['cost_price']
-                item_cost_total = qty * cost
+                item_cost_total = it['total_price']
 
                 cur.execute("SELECT id, stock_qty FROM products WHERE sku = ?", (sku,))
                 prod_row = cur.fetchone()
@@ -730,21 +861,26 @@ def upload_bulk_purchases_excel():
                     cur.execute("""
                         UPDATE products 
                         SET stock_qty = ?, cost_price = ?, wholesale_price = COALESCE(NULLIF(?, 0), wholesale_price),
-                            retail_price = COALESCE(NULLIF(?, 0), retail_price), updated_at = CURRENT_TIMESTAMP
+                            retail_price = COALESCE(NULLIF(?, 0), retail_price),
+                            hsn_code = COALESCE(NULLIF(?, ''), hsn_code),
+                            gst_rate = COALESCE(NULLIF(?, 0), gst_rate),
+                            updated_at = CURRENT_TIMESTAMP
                         WHERE id = ?
-                    """, (new_stock, cost, it['wholesale_price'], it['retail_price'], prod_id))
+                    """, (new_stock, cost, it['wholesale_price'], it['retail_price'], it['hsn_code'], it['gst_rate'], prod_id))
                 else:
                     cur.execute("""
-                        INSERT INTO products (sku, name, category, subcategory, brand, size, color, unit, cost_price, wholesale_price, retail_price, stock_qty, min_alert_qty, location, notes)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 5, ?, ?)
-                    """, (sku, it['name'], it['category'], it['subcategory'], it['brand'], it['size'], it['color'], it['unit'], cost, it['wholesale_price'], it['retail_price'], qty, it['location'], it['notes']))
+                        INSERT INTO products (sku, name, category, subcategory, brand, size, color, unit, cost_price, wholesale_price, retail_price, stock_qty, min_alert_qty, location, notes, hsn_code, gst_rate)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 5, ?, ?, ?, ?)
+                    """, (sku, it['name'], it['category'], it['subcategory'], it['brand'], it['size'], it['color'], it['unit'], cost, it['wholesale_price'], it['retail_price'], qty, it['location'], it['notes'], it['hsn_code'], it['gst_rate']))
                     prod_id = cur.lastrowid
                     new_stock = qty
 
                 cur.execute("""
-                    INSERT INTO purchase_items (purchase_id, product_id, quantity, unit_cost, total_cost)
-                    VALUES (?, ?, ?, ?, ?)
-                """, (purchase_id, prod_id, qty, cost, item_cost_total))
+                    INSERT INTO purchase_items (purchase_id, product_id, quantity, unit_cost, total_cost,
+                                                hsn_code, gst_rate, taxable_amount, tax_amount)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (purchase_id, prod_id, qty, cost, item_cost_total,
+                      it['hsn_code'], it['gst_rate'], it['taxable_amount'], it['tax_amount']))
 
                 cur.execute("""
                     INSERT INTO stock_logs (product_id, change_type, quantity_change, stock_after, reference_no, reason)
@@ -813,7 +949,7 @@ def print_invoice(sale_id):
         return "Invoice not found", 404
 
     cur.execute("SELECT * FROM sale_items WHERE sale_id = ?", (sale_id,))
-    items = [dict(r) for r in cur.fetchall()]
+    raw_items = [dict(r) for r in cur.fetchall()]
 
     party = None
     if sale['party_id']:
@@ -823,7 +959,75 @@ def print_invoice(sale_id):
             party = dict(party_row)
 
     conn.close()
-    return render_template('invoice_print.html', sale=dict(sale), items=items, party=party)
+
+    # Build HSN Summary for Indian GST Rule 46 invoice compliance
+    hsn_dict = {}
+    items = []
+    is_interstate = bool(sale['is_interstate'])
+
+    for it in raw_items:
+        hsn = str(it.get('hsn_code') or '').strip()
+        if not hsn:
+            cat = ('bag' if ('bag' in (it.get('product_name') or '').lower() or 'wallet' in (it.get('product_name') or '').lower()) else 'shoe')
+            hsn = '4202' if cat == 'bag' else '6404'
+        it['hsn_code'] = hsn
+
+        rate = float(it.get('gst_rate') or 18.0)
+        it['gst_rate'] = rate
+
+        tot = float(it.get('total_price') or 0.0)
+        taxable = float(it.get('taxable_amount') or 0.0)
+        if taxable <= 0 and tot > 0:
+            taxable = round(tot / (1.0 + (rate / 100.0)), 2)
+            tax = round(tot - taxable, 2)
+            it['taxable_amount'] = taxable
+            it['tax_amount'] = tax
+            if is_interstate:
+                it['igst_amount'] = tax
+                it['cgst_amount'] = 0.0
+                it['sgst_amount'] = 0.0
+            else:
+                it['cgst_amount'] = round(tax / 2.0, 2)
+                it['sgst_amount'] = round(tax - it['cgst_amount'], 2)
+                it['igst_amount'] = 0.0
+
+        items.append(it)
+
+        # Aggregate HSN
+        key = (hsn, rate)
+        if key not in hsn_dict:
+            desc = "Trunks, suitcases, bags, handbags, wallets" if hsn == '4202' else "Footwear, shoes, sneakers, sandals"
+            hsn_dict[key] = {
+                'hsn_code': hsn,
+                'description': desc,
+                'uqc': it.get('unit') or ('Pieces' if hsn == '4202' else 'Pairs'),
+                'total_qty': 0,
+                'gst_rate': rate,
+                'taxable_amount': 0.0,
+                'cgst_amount': 0.0,
+                'sgst_amount': 0.0,
+                'igst_amount': 0.0,
+                'total_tax': 0.0,
+                'total_amount': 0.0
+            }
+        hsn_dict[key]['total_qty'] += float(it.get('quantity') or 0)
+        hsn_dict[key]['taxable_amount'] += float(it.get('taxable_amount') or 0.0)
+        hsn_dict[key]['cgst_amount'] += float(it.get('cgst_amount') or 0.0)
+        hsn_dict[key]['sgst_amount'] += float(it.get('sgst_amount') or 0.0)
+        hsn_dict[key]['igst_amount'] += float(it.get('igst_amount') or 0.0)
+        hsn_dict[key]['total_tax'] += float(it.get('tax_amount') or (float(it.get('cgst_amount') or 0) + float(it.get('sgst_amount') or 0) + float(it.get('igst_amount') or 0)))
+        hsn_dict[key]['total_amount'] += tot
+
+    hsn_summary = list(hsn_dict.values())
+    for h in hsn_summary:
+        h['taxable_amount'] = round(h['taxable_amount'], 2)
+        h['cgst_amount'] = round(h['cgst_amount'], 2)
+        h['sgst_amount'] = round(h['sgst_amount'], 2)
+        h['igst_amount'] = round(h['igst_amount'], 2)
+        h['total_tax'] = round(h['total_tax'], 2)
+        h['total_amount'] = round(h['total_amount'], 2)
+
+    return render_template('invoice_print.html', sale=dict(sale), items=items, party=party, hsn_summary=hsn_summary)
 
 @app.route('/export/template/bulk-sale')
 @login_required
@@ -899,10 +1103,61 @@ def upload_bulk_sales_excel():
         total_sales_value = 0.0
 
         for (cust_name, cust_phone, sale_type, pay_mode, ref), items in grouped_sales.items():
-            subtotal = sum(it['quantity'] * it['unit_price'] for it in items)
-            total_discount = sum(it['discount'] for it in items)
+            party_id = None
+            is_interstate = 0
+            if sale_type == 'WHOLESALE' or cust_name != 'Walk-in Customer':
+                cur.execute("SELECT id, state_code, gst_no FROM parties WHERE name = ? AND party_type = 'WHOLESALE_BUYER'", (cust_name,))
+                p_row = cur.fetchone()
+                if p_row:
+                    party_id = p_row['id']
+                    if p_row['gst_no'] and len(p_row['gst_no'].strip()) >= 2 and p_row['gst_no'].strip()[:2] != '27':
+                        is_interstate = 1
+                else:
+                    cur.execute("INSERT INTO parties (name, phone, party_type, current_balance) VALUES (?, ?, 'WHOLESALE_BUYER', 0.0)", (cust_name, cust_phone))
+                    party_id = cur.lastrowid
+
+            # Enrich items with proper HSN and GST rates
+            calc_input_items = []
+            for it in items:
+                prod = it['product']
+                cat = prod.get('category', 'Bags')
+                hsn = it.get('hsn_code') or prod.get('hsn_code') or ('4202' if 'bag' in cat.lower() else '6404')
+                gst_rate = it.get('gst_rate') or prod.get('gst_rate') or 18.0
+                calc_input_items.append({
+                    'id': prod['id'],
+                    'name': prod['name'],
+                    'sku': prod['sku'],
+                    'size': prod['size'],
+                    'color': prod['color'],
+                    'unit': prod['unit'],
+                    'quantity': it['quantity'],
+                    'price': it['unit_price'],
+                    'unit_price': it['unit_price'],
+                    'cost_price': prod['cost_price'],
+                    'stock_qty': prod['stock_qty'],
+                    'hsn_code': str(hsn).strip(),
+                    'gst_rate': float(gst_rate)
+                })
+
+            gst_calc = excel_helpers.calculate_gst_breakdown(calc_input_items, is_interstate=bool(is_interstate), prices_include_gst=True)
+            subtotal = gst_calc['grand_total']
+            total_discount = sum(it.get('discount', 0) for it in items)
             grand_total = max(0.0, subtotal - total_discount)
             total_sales_value += grand_total
+
+            taxable_amount = gst_calc['taxable_total']
+            cgst_amount = gst_calc['cgst_total']
+            sgst_amount = gst_calc['sgst_total']
+            igst_amount = gst_calc['igst_total']
+            total_tax = gst_calc['total_tax']
+
+            if total_discount > 0 and grand_total > 0 and subtotal > 0:
+                ratio = grand_total / subtotal
+                taxable_amount = round(taxable_amount * ratio, 2)
+                cgst_amount = round(cgst_amount * ratio, 2)
+                sgst_amount = round(sgst_amount * ratio, 2)
+                igst_amount = round(igst_amount * ratio, 2)
+                total_tax = round(cgst_amount + sgst_amount + igst_amount, 2)
 
             specified_paid = [it['paid_amount'] for it in items if it['paid_amount'] is not None]
             if specified_paid:
@@ -913,45 +1168,41 @@ def upload_bulk_sales_excel():
             balance_amount = max(0.0, grand_total - paid_amount)
             payment_status = 'PAID' if balance_amount == 0 else ('PARTIAL' if paid_amount > 0 else 'CREDIT')
 
-            party_id = None
-            if sale_type == 'WHOLESALE' or cust_name != 'Walk-in Customer':
-                cur.execute("SELECT id FROM parties WHERE name = ? AND party_type = 'WHOLESALE_BUYER'", (cust_name,))
-                p_row = cur.fetchone()
-                if p_row:
-                    party_id = p_row[0]
-                else:
-                    cur.execute("INSERT INTO parties (name, phone, party_type, current_balance) VALUES (?, ?, 'WHOLESALE_BUYER', 0.0)", (cust_name, cust_phone))
-                    party_id = cur.lastrowid
-
             invoice_no = get_next_invoice_number(conn, prefix=prefix)
             notes = f"Bulk Excel Import (Ref: {ref})"
 
             cur.execute("""
                 INSERT INTO sales (invoice_no, sale_type, party_id, customer_name, customer_phone, 
                                    subtotal, discount, grand_total, payment_mode, payment_status, 
-                                   paid_amount, balance_amount, notes, salesman_id, salesman_name)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                   paid_amount, balance_amount, notes, salesman_id, salesman_name,
+                                   taxable_amount, cgst_amount, sgst_amount, igst_amount, total_tax, is_interstate)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (invoice_no, sale_type, party_id, cust_name, cust_phone, subtotal, total_discount, grand_total,
-                  pay_mode, payment_status, paid_amount, balance_amount, notes, salesman_id, salesman_name))
+                  pay_mode, payment_status, paid_amount, balance_amount, notes, salesman_id, salesman_name,
+                  taxable_amount, cgst_amount, sgst_amount, igst_amount, total_tax, is_interstate))
             sale_id = cur.lastrowid
             total_invoices_created += 1
 
-            for it in items:
-                prod = it['product']
-                prod_id = prod['id']
+            for it in gst_calc['items']:
+                prod_id = it['id']
                 qty = it['quantity']
                 price = it['unit_price']
-                cost = prod['cost_price']
-                item_total = qty * price
+                cost = it['cost_price']
+                item_total = it['total_price']
 
-                new_stock = prod['stock_qty'] - qty
+                cur.execute("SELECT stock_qty FROM products WHERE id = ?", (prod_id,))
+                cur_prod = cur.fetchone()
+                new_stock = cur_prod['stock_qty'] - qty
                 cur.execute("UPDATE products SET stock_qty = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (new_stock, prod_id))
-                prod['stock_qty'] = new_stock
 
                 cur.execute("""
-                    INSERT INTO sale_items (sale_id, product_id, product_name, sku, size, color, unit, quantity, unit_price, cost_price, total_price)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (sale_id, prod_id, prod['name'], prod['sku'], prod['size'], prod['color'], prod['unit'], qty, price, cost, item_total))
+                    INSERT INTO sale_items (sale_id, product_id, product_name, sku, size, color, unit, quantity, unit_price, cost_price, total_price,
+                                            hsn_code, gst_rate, taxable_amount, cgst_amount, sgst_amount, igst_amount, tax_amount)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (sale_id, prod_id, it['name'], it['sku'], it['size'], it['color'], it['unit'],
+                      qty, price, cost, item_total,
+                      it['hsn_code'], it['gst_rate'], it['taxable_amount'],
+                      it['cgst_amount'], it['sgst_amount'], it['igst_amount'], it['tax_amount']))
 
                 cur.execute("""
                     INSERT INTO stock_logs (product_id, change_type, quantity_change, stock_after, reference_no, reason)
@@ -1036,13 +1287,71 @@ def create_estimate():
         customer_phone = data.get('customer_phone', '').strip()
         party_id = data.get('party_id') or None
         order_type = data.get('order_type', 'WHOLESALE').upper()
-        subtotal = float(data.get('subtotal', 0.0))
+        # Determine interstate for estimate
+        is_interstate = int(data.get('is_interstate', 0))
+        cur.execute("SELECT state_code FROM settings LIMIT 1")
+        s_row = cur.fetchone()
+        shop_sc = (s_row['state_code'] if s_row and s_row['state_code'] else '27').strip()
+        if party_id:
+            cur.execute("SELECT state_code, gst_no FROM parties WHERE id = ?", (party_id,))
+            p_row = cur.fetchone()
+            if p_row:
+                p_sc = (p_row['state_code'] or '').strip()
+                if not p_sc and p_row['gst_no'] and len(p_row['gst_no'].strip()) >= 2:
+                    p_sc = p_row['gst_no'].strip()[:2]
+                if p_sc and p_sc != shop_sc:
+                    is_interstate = 1
+
+        enriched_items = []
+        for item in data['items']:
+            prod_id = item['id']
+            qty = int(item['quantity'])
+            price = float(item['price'])
+            cur.execute("SELECT name, sku, size, color, unit, category, hsn_code, gst_rate FROM products WHERE id = ?", (prod_id,))
+            prod = cur.fetchone()
+            if not prod:
+                raise Exception(f"Product ID {prod_id} not found!")
+
+            cat = prod['category'] or 'Bags'
+            hsn = str(prod['hsn_code'] or ('4202' if 'bag' in cat.lower() else '6404')).strip()
+            gst_rate = float(prod['gst_rate'] if prod['gst_rate'] is not None else 18.0)
+
+            enriched_items.append({
+                'id': prod_id,
+                'name': prod['name'],
+                'sku': prod['sku'],
+                'size': prod['size'],
+                'color': prod['color'],
+                'unit': prod['unit'] or ('Pieces' if cat == 'Bags' else 'Pairs'),
+                'quantity': qty,
+                'unit_price': price,
+                'price': price,
+                'hsn_code': hsn,
+                'gst_rate': gst_rate
+            })
+
+        gst_calc = excel_helpers.calculate_gst_breakdown(enriched_items, is_interstate=bool(is_interstate), prices_include_gst=True)
+        subtotal = float(data.get('subtotal', gst_calc['grand_total']))
         discount = float(data.get('discount', 0.0))
-        grand_total = float(data.get('grand_total', 0.0))
+        grand_total = float(data.get('grand_total', max(0.0, subtotal - discount)))
         advance_amount = float(data.get('advance_amount', 0.0))
         advance_payment_mode = data.get('advance_payment_mode', 'CASH').upper()
         expected_dispatch_date = data.get('expected_dispatch_date') or None
         notes = data.get('notes', '').strip()
+
+        taxable_amount = gst_calc['taxable_total']
+        cgst_amount = gst_calc['cgst_total']
+        sgst_amount = gst_calc['sgst_total']
+        igst_amount = gst_calc['igst_total']
+        total_tax = gst_calc['total_tax']
+
+        if discount > 0 and grand_total > 0 and subtotal > 0:
+            ratio = grand_total / subtotal
+            taxable_amount = round(taxable_amount * ratio, 2)
+            cgst_amount = round(cgst_amount * ratio, 2)
+            sgst_amount = round(sgst_amount * ratio, 2)
+            igst_amount = round(igst_amount * ratio, 2)
+            total_tax = round(cgst_amount + sgst_amount + igst_amount, 2)
 
         balance_amount = max(0.0, grand_total - advance_amount)
         salesman_id = session.get('user_id')
@@ -1053,28 +1362,23 @@ def create_estimate():
         cur.execute("""
             INSERT INTO estimates (estimate_no, party_id, customer_name, customer_phone, order_type,
                                    subtotal, discount, grand_total, advance_amount, advance_payment_mode,
-                                   balance_amount, status, expected_dispatch_date, salesman_id, salesman_name, notes)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'BOOKED', ?, ?, ?, ?)
+                                   balance_amount, status, expected_dispatch_date, salesman_id, salesman_name, notes,
+                                   taxable_amount, cgst_amount, sgst_amount, igst_amount, total_tax, is_interstate)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'BOOKED', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (estimate_no, party_id, customer_name, customer_phone, order_type,
               subtotal, discount, grand_total, advance_amount, advance_payment_mode,
-              balance_amount, expected_dispatch_date, salesman_id, salesman_name, notes))
+              balance_amount, expected_dispatch_date, salesman_id, salesman_name, notes,
+              taxable_amount, cgst_amount, sgst_amount, igst_amount, total_tax, is_interstate))
         estimate_id = cur.lastrowid
 
-        for item in data['items']:
-            prod_id = item['id']
-            qty = int(item['quantity'])
-            price = float(item['price'])
-            item_total = qty * price
-
-            cur.execute("SELECT name, sku, size, color, unit FROM products WHERE id = ?", (prod_id,))
-            prod = cur.fetchone()
-            if not prod:
-                raise Exception(f"Product ID {prod_id} not found!")
-
+        for it in gst_calc['items']:
             cur.execute("""
-                INSERT INTO estimate_items (estimate_id, product_id, product_name, sku, size, color, unit, quantity, unit_price, total_price)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (estimate_id, prod_id, prod['name'], prod['sku'], prod['size'], prod['color'], prod['unit'], qty, price, item_total))
+                INSERT INTO estimate_items (estimate_id, product_id, product_name, sku, size, color, unit, quantity, unit_price, total_price,
+                                            hsn_code, gst_rate, taxable_amount, tax_amount)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (estimate_id, it['id'], it['name'], it['sku'], it['size'], it['color'], it['unit'],
+                  it['quantity'], it['unit_price'], it['total_price'],
+                  it['hsn_code'], it['gst_rate'], it['taxable_amount'], it['tax_amount']))
 
         conn.commit()
         return jsonify({
@@ -1164,24 +1468,47 @@ def dispatch_estimate(estimate_id):
         if est['notes']:
             notes += f" | {est['notes']}"
 
-        # Insert Sale
+        # Insert Sale with GST fields
+        is_interstate = bool(est['is_interstate']) if 'is_interstate' in est.keys() else False
+        taxable_amount = est['taxable_amount'] if 'taxable_amount' in est.keys() else 0.0
+        cgst_amount = est['cgst_amount'] if 'cgst_amount' in est.keys() else 0.0
+        sgst_amount = est['sgst_amount'] if 'sgst_amount' in est.keys() else 0.0
+        igst_amount = est['igst_amount'] if 'igst_amount' in est.keys() else 0.0
+        total_tax = est['total_tax'] if 'total_tax' in est.keys() else 0.0
+
         cur.execute("""
             INSERT INTO sales (invoice_no, sale_type, party_id, customer_name, customer_phone, 
                                subtotal, discount, grand_total, payment_mode, payment_status, 
                                paid_amount, balance_amount, notes, salesman_id, salesman_name,
-                               estimate_id, advance_adjusted)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                               estimate_id, advance_adjusted,
+                               taxable_amount, cgst_amount, sgst_amount, igst_amount, total_tax, is_interstate)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (invoice_no, est['order_type'], est['party_id'], est['customer_name'], est['customer_phone'],
               est['subtotal'], est['discount'], grand_total, dispatch_payment_mode, payment_status,
               total_paid, final_balance, notes, salesman_id, salesman_name,
-              estimate_id, advance_amount))
+              estimate_id, advance_amount,
+              taxable_amount, cgst_amount, sgst_amount, igst_amount, total_tax, 1 if is_interstate else 0))
         sale_id = cur.lastrowid
 
-        # Deduct physical stock and insert sale items
+        # Deduct physical stock and insert sale items with GST fields
         for it in items:
             prod_id = it['product_id']
             qty = it['quantity']
             price = it['unit_price']
+            tot_price = it['total_price']
+            hsn = it['hsn_code'] if 'hsn_code' in it.keys() and it['hsn_code'] else ('4202' if 'bag' in it['product_name'].lower() else '6404')
+            gst_rate = float(it['gst_rate']) if 'gst_rate' in it.keys() and it['gst_rate'] is not None else 18.0
+            
+            taxable_val = float(it['taxable_amount']) if 'taxable_amount' in it.keys() and it['taxable_amount'] else round(tot_price / (1.0 + (gst_rate / 100.0)), 2)
+            tax_val = float(it['tax_amount']) if 'tax_amount' in it.keys() and it['tax_amount'] else round(tot_price - taxable_val, 2)
+            if is_interstate:
+                cgst = 0.0
+                sgst = 0.0
+                igst = tax_val
+            else:
+                cgst = round(tax_val / 2.0, 2)
+                sgst = round(tax_val - cgst, 2)
+                igst = 0.0
 
             cur.execute("SELECT stock_qty, cost_price FROM products WHERE id = ?", (prod_id,))
             prod = cur.fetchone()
@@ -1191,9 +1518,12 @@ def dispatch_estimate(estimate_id):
             cur.execute("UPDATE products SET stock_qty = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (new_stock, prod_id))
 
             cur.execute("""
-                INSERT INTO sale_items (sale_id, product_id, product_name, sku, size, color, unit, quantity, unit_price, cost_price, total_price)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (sale_id, prod_id, it['product_name'], it['sku'], it['size'], it['color'], it['unit'], qty, price, cost_price, qty * price))
+                INSERT INTO sale_items (sale_id, product_id, product_name, sku, size, color, unit, quantity, unit_price, cost_price, total_price,
+                                        hsn_code, gst_rate, taxable_amount, cgst_amount, sgst_amount, igst_amount, tax_amount)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (sale_id, prod_id, it['product_name'], it['sku'], it['size'], it['color'], it['unit'],
+                  qty, price, cost_price, tot_price,
+                  hsn, gst_rate, taxable_val, cgst, sgst, igst, tax_val))
 
             cur.execute("""
                 INSERT INTO stock_logs (product_id, change_type, quantity_change, stock_after, reference_no, reason)
@@ -1463,6 +1793,8 @@ def settings():
         currency_symbol = request.form.get('currency_symbol', '₹').strip()
         invoice_prefix = request.form.get('invoice_prefix', 'SSIPL').strip() or 'SSIPL'
         invoice_footer = request.form.get('invoice_footer', '').strip()
+        state_code = request.form.get('state_code', '27').strip() or '27'
+        state_name = request.form.get('state_name', 'Maharashtra').strip() or 'Maharashtra'
         remove_logo = request.form.get('remove_logo') == '1'
 
         logo_file = request.files.get('logo')
@@ -1474,31 +1806,68 @@ def settings():
 
             cur.execute("""
                 UPDATE settings 
-                SET shop_name=?, tagline=?, phone=?, email=?, address=?, tax_number=?, currency_symbol=?, invoice_prefix=?, logo_path=?, invoice_footer=?, updated_at=CURRENT_TIMESTAMP
+                SET shop_name=?, tagline=?, phone=?, email=?, address=?, tax_number=?, currency_symbol=?, invoice_prefix=?, logo_path=?, invoice_footer=?, state_code=?, state_name=?, updated_at=CURRENT_TIMESTAMP
                 WHERE id = (SELECT id FROM settings ORDER BY id ASC LIMIT 1)
-            """, (shop_name, tagline, phone, email, address, tax_number, currency_symbol, invoice_prefix, logo_data_uri, invoice_footer))
+            """, (shop_name, tagline, phone, email, address, tax_number, currency_symbol, invoice_prefix, logo_data_uri, invoice_footer, state_code, state_name))
         elif remove_logo:
             cur.execute("""
                 UPDATE settings 
-                SET shop_name=?, tagline=?, phone=?, email=?, address=?, tax_number=?, currency_symbol=?, invoice_prefix=?, logo_path='', invoice_footer=?, updated_at=CURRENT_TIMESTAMP
+                SET shop_name=?, tagline=?, phone=?, email=?, address=?, tax_number=?, currency_symbol=?, invoice_prefix=?, logo_path='', invoice_footer=?, state_code=?, state_name=?, updated_at=CURRENT_TIMESTAMP
                 WHERE id = (SELECT id FROM settings ORDER BY id ASC LIMIT 1)
-            """, (shop_name, tagline, phone, email, address, tax_number, currency_symbol, invoice_prefix, invoice_footer))
+            """, (shop_name, tagline, phone, email, address, tax_number, currency_symbol, invoice_prefix, invoice_footer, state_code, state_name))
         else:
             cur.execute("""
                 UPDATE settings 
-                SET shop_name=?, tagline=?, phone=?, email=?, address=?, tax_number=?, currency_symbol=?, invoice_prefix=?, invoice_footer=?, updated_at=CURRENT_TIMESTAMP
+                SET shop_name=?, tagline=?, phone=?, email=?, address=?, tax_number=?, currency_symbol=?, invoice_prefix=?, invoice_footer=?, state_code=?, state_name=?, updated_at=CURRENT_TIMESTAMP
                 WHERE id = (SELECT id FROM settings ORDER BY id ASC LIMIT 1)
-            """, (shop_name, tagline, phone, email, address, tax_number, currency_symbol, invoice_prefix, invoice_footer))
+            """, (shop_name, tagline, phone, email, address, tax_number, currency_symbol, invoice_prefix, invoice_footer, state_code, state_name))
 
         conn.commit()
         conn.close()
-        flash('Shop profile, logo, and invoice settings updated successfully!', 'success')
+        flash('Shop profile, logo, state code, and invoice settings updated successfully!', 'success')
         return redirect(url_for('settings'))
 
     cur.execute("SELECT * FROM settings ORDER BY id ASC LIMIT 1")
     current_settings = dict(cur.fetchone())
     conn.close()
     return render_template('settings.html', s=current_settings)
+
+# ----------------- INDIAN GST REPORTS & RETURNS (GSTR-1 & GSTR-3B) -----------------
+@app.route('/gst-reports')
+@login_required
+@role_required(['ADMIN', 'ACCOUNTING'])
+def gst_reports():
+    start_date = request.args.get('start_date', '')
+    end_date = request.args.get('end_date', '')
+
+    # Default to current month
+    if not start_date and not end_date:
+        today = date.today()
+        start_date = today.replace(day=1).isoformat()
+        end_date = today.isoformat()
+
+    conn = get_connection()
+    summary = excel_helpers.generate_gstr3b_summary_data(conn, start_date=start_date if start_date else None, end_date=end_date if end_date else None)
+    settings_data = get_settings()
+    conn.close()
+
+    return render_template('gst_reports.html', summary=summary, start_date=start_date, end_date=end_date, settings=settings_data)
+
+
+@app.route('/export/gstr1')
+@login_required
+@role_required(['ADMIN', 'ACCOUNTING'])
+def export_gstr1():
+    start_date = request.args.get('start_date', '') or None
+    end_date = request.args.get('end_date', '') or None
+
+    conn = get_connection()
+    try:
+        file_bytes, filename, mimetype = excel_helpers.generate_gstr1_excel_report(conn, start_date=start_date, end_date=end_date)
+    finally:
+        conn.close()
+
+    return send_file(io.BytesIO(file_bytes), mimetype=mimetype, as_attachment=True, download_name=filename)
 
 # ----------------- FRIENDLY ERROR HANDLERS -----------------
 @app.errorhandler(404)
