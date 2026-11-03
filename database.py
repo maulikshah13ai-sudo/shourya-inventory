@@ -143,20 +143,20 @@ def init_db():
     cursor.execute("UPDATE products SET hsn_code = '6404', gst_rate = 18.0 WHERE category = 'Shoes' AND (hsn_code IS NULL OR hsn_code = '' OR hsn_code = '4202')")
 
     # Ensure shop name is updated to SSIPL
-    cursor.execute("UPDATE settings SET shop_name = 'SSIPL Bags & Footwear Hub' WHERE shop_name = 'Apex Footwear & Bags Hub'")
+    cursor.execute("UPDATE settings SET shop_name = 'SSIPL Bags & Footwear Hub' WHERE shop_name LIKE '%Apex%'")
     cursor.execute("UPDATE users SET full_name = 'Sales Staff 1' WHERE username = 'sales1' AND full_name = 'Floor Salesman'")
 
-    # Set default logo from static/img/logo.png if logo_path is empty
+    # Set default logo from static/img/logo.png if logo_path is empty or missing
     static_logo_file = os.path.join(os.path.dirname(__file__), 'static', 'img', 'logo.png')
     if os.path.exists(static_logo_file):
         import base64
-        cursor.execute("SELECT logo_path FROM settings LIMIT 1")
+        cursor.execute("SELECT logo_path FROM settings ORDER BY id ASC LIMIT 1")
         row = cursor.fetchone()
-        if row and (not row[0] or len(row[0].strip()) == 0):
+        if row and (not row[0] or len(str(row[0]).strip()) == 0 or not str(row[0]).startswith('data:image')):
             try:
                 with open(static_logo_file, 'rb') as f:
                     b64 = base64.b64encode(f.read()).decode('utf-8')
-                cursor.execute("UPDATE settings SET logo_path = ? WHERE id = 1", (f"data:image/png;base64,{b64}",))
+                cursor.execute("UPDATE settings SET logo_path = ? WHERE id = (SELECT id FROM settings ORDER BY id ASC LIMIT 1)", (f"data:image/png;base64,{b64}",))
             except Exception:
                 pass
 

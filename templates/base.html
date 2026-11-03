@@ -41,13 +41,8 @@
             <div class="flex items-center justify-between h-16">
                 <!-- Brand / Logo -->
                 <div class="flex items-center space-x-3">
-                    {% if settings.logo_path %}
-                        <img src="{{ settings.logo_path }}" alt="Logo" class="w-10 h-10 object-contain rounded-xl bg-white p-1 shadow-md">
-                    {% else %}
-                        <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-sky-500 to-indigo-600 flex items-center justify-center text-white shadow-lg font-bold text-xl">
-                            👞👜
-                        </div>
-                    {% endif %}
+                    {% set active_logo = settings.logo_path if (settings.logo_path and settings.logo_path.strip()) else url_for('static', filename='img/logo.png') %}
+                    <img src="{{ active_logo }}" alt="Logo" class="w-10 h-10 object-contain rounded-xl bg-white p-1 shadow-md">
                     <div>
                         <a href="{{ url_for('dashboard') }}" class="text-lg font-bold tracking-tight text-white hover:text-sky-300 transition flex items-center gap-2">
                             {{ settings.shop_name }}
@@ -65,7 +60,7 @@
                     {% endif %}
 
                     {% if current_user.role in ('ADMIN', 'SALESMAN', 'ACCOUNTING') %}
-                    <a href="{{ url_for('pos') }}" class="px-3 py-2 rounded-lg text-sm font-semibold {% if request.path == '/pos' %}bg-emerald-600 text-white{% else %}bg-emerald-600/90 text-white hover:bg-emerald-700{% endif %} flex items-center gap-1.5 transition shadow-sm">
+                    <a href="{{ url_for('pos') }}" target="_blank" title="Open POS Billing in a fresh window" class="px-3 py-2 rounded-lg text-sm font-semibold {% if request.path == '/pos' %}bg-emerald-600 text-white{% else %}bg-emerald-600/90 text-white hover:bg-emerald-700{% endif %} flex items-center gap-1.5 transition shadow-sm">
                         <i data-lucide="shopping-cart" class="w-4 h-4"></i> New Bill / POS
                     </a>
                     {% endif %}
@@ -138,7 +133,7 @@
         <!-- Mobile Navigation Subbar -->
         <div class="md:hidden flex overflow-x-auto space-x-1 px-4 py-2 border-t border-slate-800 bg-slate-900/95 scrollbar-none text-xs">
             <a href="{{ url_for('dashboard') }}" class="px-2.5 py-1.5 rounded-md whitespace-nowrap {% if request.path == '/' %}bg-sky-600 text-white{% else %}text-slate-300{% endif %}">Dashboard</a>
-            <a href="{{ url_for('pos') }}" class="px-2.5 py-1.5 rounded-md whitespace-nowrap bg-emerald-600 text-white font-bold">⚡ POS Bill</a>
+            <a href="{{ url_for('pos') }}" target="_blank" class="px-2.5 py-1.5 rounded-md whitespace-nowrap bg-emerald-600 text-white font-bold">⚡ POS Bill</a>
             <a href="{{ url_for('inventory') }}" class="px-2.5 py-1.5 rounded-md whitespace-nowrap {% if request.path == '/inventory' %}bg-sky-600 text-white{% else %}text-slate-300{% endif %}">Stock</a>
             <a href="{{ url_for('purchases') }}" class="px-2.5 py-1.5 rounded-md whitespace-nowrap {% if request.path == '/purchases' %}bg-sky-600 text-white{% else %}text-slate-300{% endif %}">Stock In</a>
             <a href="{{ url_for('sales') }}" class="px-2.5 py-1.5 rounded-md whitespace-nowrap {% if request.path == '/sales' %}bg-sky-600 text-white{% else %}text-slate-300{% endif %}">Sales</a>
@@ -176,7 +171,7 @@
     </div>
 
     <!-- Main Content Area -->
-    <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+    <main class="{% block main_container_class %}flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6{% endblock %}">
         {% block content %}{% endblock %}
     </main>
 
