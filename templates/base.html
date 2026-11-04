@@ -90,6 +90,9 @@
                     <a href="{{ url_for('sales') }}" class="px-3 py-2 rounded-lg text-sm font-medium {% if request.path == '/sales' %}bg-sky-600 text-white{% else %}text-slate-300 hover:bg-slate-800 hover:text-white{% endif %} flex items-center gap-1.5 transition">
                         <i data-lucide="receipt" class="w-4 h-4"></i> Sales History
                     </a>
+                    <a href="{{ url_for('sales_report') }}" class="px-3 py-2 rounded-lg text-sm font-medium {% if request.path.startswith('/reports') %}bg-indigo-600 text-white shadow-sm{% else %}text-indigo-200 hover:bg-slate-800 hover:text-white{% endif %} flex items-center gap-1.5 transition">
+                        <i data-lucide="bar-chart-3" class="w-4 h-4 text-indigo-400"></i> Reports
+                    </a>
                     {% endif %}
 
                     {% if current_user.role in ('ADMIN', 'ACCOUNTING') %}
@@ -137,6 +140,7 @@
             <a href="{{ url_for('inventory') }}" class="px-2.5 py-1.5 rounded-md whitespace-nowrap {% if request.path == '/inventory' %}bg-sky-600 text-white{% else %}text-slate-300{% endif %}">Stock</a>
             <a href="{{ url_for('purchases') }}" class="px-2.5 py-1.5 rounded-md whitespace-nowrap {% if request.path == '/purchases' %}bg-sky-600 text-white{% else %}text-slate-300{% endif %}">Stock In</a>
             <a href="{{ url_for('sales') }}" class="px-2.5 py-1.5 rounded-md whitespace-nowrap {% if request.path == '/sales' %}bg-sky-600 text-white{% else %}text-slate-300{% endif %}">Sales</a>
+            <a href="{{ url_for('sales_report') }}" class="px-2.5 py-1.5 rounded-md whitespace-nowrap {% if request.path.startswith('/reports') %}bg-indigo-600 text-white font-bold{% else %}text-indigo-200{% endif %}">📊 Reports</a>
             <a href="{{ url_for('ledger') }}" class="px-2.5 py-1.5 rounded-md whitespace-nowrap {% if request.path == '/ledger' %}bg-sky-600 text-white{% else %}text-slate-300{% endif %}">Khata</a>
             <a href="{{ url_for('gst_reports') }}" class="px-2.5 py-1.5 rounded-md whitespace-nowrap {% if request.path == '/gst-reports' %}bg-purple-600 text-white{% else %}text-purple-300{% endif %}">GST</a>
         </div>

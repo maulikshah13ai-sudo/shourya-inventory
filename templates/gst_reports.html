@@ -20,6 +20,17 @@
                     <span>GSTIN: <b class="text-white">{{ settings.tax_number or '27AAAAA0000A1Z5' }}</b></span>
                     <span>State: <b class="text-white">{{ settings.state_name or 'Maharashtra' }} (Code: {{ settings.state_code or '27' }})</b></span>
                 </div>
+                <div class="mt-4 flex flex-wrap items-center gap-2 text-xs">
+                    <a href="{{ url_for('sales_report') }}" class="px-4 py-1.5 rounded-full font-semibold bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white transition flex items-center gap-1.5">
+                        <i data-lucide="trending-up" class="w-3.5 h-3.5"></i> Sales Reports
+                    </a>
+                    <a href="{{ url_for('purchase_report') }}" class="px-4 py-1.5 rounded-full font-semibold bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white transition flex items-center gap-1.5">
+                        <i data-lucide="truck" class="w-3.5 h-3.5"></i> Purchase Reports
+                    </a>
+                    <a href="{{ url_for('gst_reports') }}" class="px-4 py-1.5 rounded-full font-bold bg-purple-600 text-white shadow-sm flex items-center gap-1.5">
+                        <i data-lucide="file-text" class="w-3.5 h-3.5"></i> GST & Tax Returns
+                    </a>
+                </div>
             </div>
 
             <!-- Download GSTR-1 Excel Return Button -->

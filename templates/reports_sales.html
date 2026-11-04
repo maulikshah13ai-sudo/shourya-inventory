@@ -1,0 +1,510 @@
+{% extends "base.html" %}
+
+{% block title %}Sales Reports & Product Analytics - {{ settings.shop_name }}{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+
+    <!-- Sub-Navigation Header & Report Hub Switcher -->
+    <div class="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white rounded-3xl p-6 sm:p-8 shadow-xl relative overflow-hidden">
+        <div class="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+            <div>
+                <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-400/30 text-xs font-semibold uppercase tracking-wider mb-2">
+                    <i data-lucide="bar-chart-3" class="w-3.5 h-3.5 text-indigo-400"></i> Multi-Dimensional Sales Intelligence
+                </div>
+                <h1 class="text-2xl sm:text-3xl font-black tracking-tight text-white flex items-center gap-3">
+                    Sales & Product Performance Reports
+                </h1>
+                <p class="text-slate-300 text-xs sm:text-sm mt-1 max-w-2xl">
+                    Analyze product movement, revenue turnover, gross profit margins, output GST, salesman contributions, and customer wholesale/retail channels.
+                </p>
+                <div class="mt-4 flex flex-wrap items-center gap-2 text-xs">
+                    <a href="{{ url_for('sales_report') }}" class="px-4 py-1.5 rounded-full font-bold bg-indigo-600 text-white shadow-sm flex items-center gap-1.5">
+                        <i data-lucide="trending-up" class="w-3.5 h-3.5"></i> Sales Reports
+                    </a>
+                    <a href="{{ url_for('purchase_report') }}" class="px-4 py-1.5 rounded-full font-semibold bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white transition flex items-center gap-1.5">
+                        <i data-lucide="truck" class="w-3.5 h-3.5"></i> Purchase Reports
+                    </a>
+                    <a href="{{ url_for('gst_reports') }}" class="px-4 py-1.5 rounded-full font-semibold bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white transition flex items-center gap-1.5">
+                        <i data-lucide="file-text" class="w-3.5 h-3.5"></i> GST & Tax Returns
+                    </a>
+                </div>
+            </div>
+
+            <!-- Export Buttons -->
+            <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+                <a href="{{ url_for('export_sales_report_excel', start_date=start_date, end_date=end_date, product_id=product_id, category=category, payment_mode=payment_mode, salesman_id=salesman_id, sale_type=sale_type, search=search) }}"
+                   class="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs sm:text-sm shadow-lg shadow-emerald-900/30 transition transform hover:-translate-y-0.5">
+                    <i data-lucide="file-spreadsheet" class="w-4 h-4"></i>
+                    Export Multi-Sheet Excel (.xlsx)
+                </a>
+                <a href="{{ url_for('export_sales_report_csv', start_date=start_date, end_date=end_date, product_id=product_id, category=category, payment_mode=payment_mode, salesman_id=salesman_id, sale_type=sale_type, search=search) }}"
+                   class="inline-flex items-center justify-center gap-2 px-4 py-3 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs sm:text-sm border border-slate-700 shadow transition">
+                    <i data-lucide="download" class="w-4 h-4"></i>
+                    Export CSV
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Filter Toolbar -->
+    <div class="bg-white p-5 rounded-3xl border border-slate-200 shadow-xs space-y-4">
+        <!-- Quick Date Range Presets -->
+        <div class="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-100 text-xs">
+            <span class="font-bold text-slate-500 flex items-center gap-1.5">
+                <i data-lucide="clock" class="w-3.5 h-3.5 text-indigo-500"></i> Quick Range:
+            </span>
+            <div class="flex flex-wrap items-center gap-1.5">
+                <button type="button" onclick="setPreset('today')" class="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 font-semibold text-slate-600 transition">Today</button>
+                <button type="button" onclick="setPreset('yesterday')" class="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 font-semibold text-slate-600 transition">Yesterday</button>
+                <button type="button" onclick="setPreset('this_week')" class="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 font-semibold text-slate-600 transition">This Week</button>
+                <button type="button" onclick="setPreset('this_month')" class="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 font-semibold text-slate-600 transition">This Month</button>
+                <button type="button" onclick="setPreset('last_month')" class="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 font-semibold text-slate-600 transition">Last Month</button>
+                <button type="button" onclick="setPreset('fy')" class="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 font-semibold text-slate-600 transition">FY 26-27</button>
+                <button type="button" onclick="setPreset('all')" class="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 font-semibold text-slate-600 transition">All Time</button>
+            </div>
+        </div>
+
+        <form id="filterForm" method="GET" action="{{ url_for('sales_report') }}" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-8 gap-3 text-xs">
+            <input type="hidden" name="view" id="viewInput" value="{{ view_type }}">
+
+            <!-- From Date -->
+            <div>
+                <label class="block font-semibold text-slate-600 mb-1">From Date</label>
+                <input type="date" id="start_date" name="start_date" value="{{ start_date }}" class="w-full px-2.5 py-2 bg-slate-50 border border-slate-300 rounded-xl font-medium focus:ring-2 focus:ring-indigo-500 focus:outline-hidden">
+            </div>
+
+            <!-- To Date -->
+            <div>
+                <label class="block font-semibold text-slate-600 mb-1">To Date</label>
+                <input type="date" id="end_date" name="end_date" value="{{ end_date }}" class="w-full px-2.5 py-2 bg-slate-50 border border-slate-300 rounded-xl font-medium focus:ring-2 focus:ring-indigo-500 focus:outline-hidden">
+            </div>
+
+            <!-- Category -->
+            <div>
+                <label class="block font-semibold text-slate-600 mb-1">Category</label>
+                <select name="category" class="w-full px-2.5 py-2 bg-slate-50 border border-slate-300 rounded-xl font-medium focus:ring-2 focus:ring-indigo-500 focus:outline-hidden">
+                    <option value="">All Categories</option>
+                    <option value="Bags" {% if category == 'Bags' %}selected{% endif %}>🎒 Bags & Luggage</option>
+                    <option value="Shoes" {% if category == 'Shoes' %}selected{% endif %}>👟 Footwear</option>
+                </select>
+            </div>
+
+            <!-- Product -->
+            <div>
+                <label class="block font-semibold text-slate-600 mb-1">Product</label>
+                <select name="product_id" class="w-full px-2.5 py-2 bg-slate-50 border border-slate-300 rounded-xl font-medium focus:ring-2 focus:ring-indigo-500 focus:outline-hidden">
+                    <option value="">All Products</option>
+                    {% for p in products_list %}
+                    <option value="{{ p.id }}" {% if product_id == p.id|string %}selected{% endif %}>{{ p.name }} ({{ p.sku }})</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <!-- Salesman -->
+            <div>
+                <label class="block font-semibold text-slate-600 mb-1">Salesman</label>
+                <select name="salesman_id" class="w-full px-2.5 py-2 bg-slate-50 border border-slate-300 rounded-xl font-medium focus:ring-2 focus:ring-indigo-500 focus:outline-hidden">
+                    <option value="">All Salesmen</option>
+                    {% for s in salesmen_list %}
+                    <option value="{{ s.id }}" {% if salesman_id == s.id|string %}selected{% endif %}>{{ s.full_name }} (@{{ s.username }})</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <!-- Payment Mode -->
+            <div>
+                <label class="block font-semibold text-slate-600 mb-1">Payment Mode</label>
+                <select name="payment_mode" class="w-full px-2.5 py-2 bg-slate-50 border border-slate-300 rounded-xl font-medium focus:ring-2 focus:ring-indigo-500 focus:outline-hidden">
+                    <option value="">All Payment Modes</option>
+                    {% for m in payment_modes %}
+                    <option value="{{ m }}" {% if payment_mode == m %}selected{% endif %}>{{ m }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <!-- Sale Type -->
+            <div>
+                <label class="block font-semibold text-slate-600 mb-1">Sale Type</label>
+                <select name="sale_type" class="w-full px-2.5 py-2 bg-slate-50 border border-slate-300 rounded-xl font-medium focus:ring-2 focus:ring-indigo-500 focus:outline-hidden">
+                    <option value="">All Types</option>
+                    <option value="RETAIL" {% if sale_type == 'RETAIL' %}selected{% endif %}>Retail (POS)</option>
+                    <option value="WHOLESALE" {% if sale_type == 'WHOLESALE' %}selected{% endif %}>Wholesale (B2B)</option>
+                </select>
+            </div>
+
+            <!-- Search Term & Action Buttons -->
+            <div>
+                <label class="block font-semibold text-slate-600 mb-1">Search Keywords</label>
+                <div class="flex items-center gap-1.5">
+                    <input type="text" name="search" value="{{ search }}" placeholder="Bill #, Customer, SKU..." class="w-full px-2.5 py-2 bg-slate-50 border border-slate-300 rounded-xl font-medium focus:ring-2 focus:ring-indigo-500 focus:outline-hidden">
+                </div>
+            </div>
+
+            <!-- Submit & Reset Row -->
+            <div class="xl:col-span-8 flex items-center justify-between pt-2">
+                <div class="flex items-center gap-2">
+                    <button type="submit" class="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold shadow-xs transition flex items-center gap-1.5">
+                        <i data-lucide="filter" class="w-3.5 h-3.5"></i> Apply Filters
+                    </button>
+                    <a href="{{ url_for('sales_report') }}" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-semibold transition">
+                        Reset Filters
+                    </a>
+                </div>
+                <div class="text-xs text-slate-500 font-medium">
+                    Showing <b>{{ kpis.items_count }}</b> item transactions across <b>{{ kpis.invoices_count }}</b> invoices
+                </div>
+            </div>
+        </form>
+    </div>
+
+    <!-- Sales & Profit KPI Overview Cards -->
+    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+        <!-- Total Units Sold -->
+        <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
+            <div class="flex items-center justify-between text-slate-500 mb-1">
+                <span class="text-xs font-semibold">Total Qty Sold</span>
+                <i data-lucide="package-check" class="w-4 h-4 text-indigo-600"></i>
+            </div>
+            <div class="text-xl font-black text-slate-900">{{ "{:,}".format(kpis.total_qty) }} <span class="text-xs font-normal text-slate-500">Units</span></div>
+            <div class="text-[11px] text-slate-400 mt-1">{{ product_summary|length }} unique products</div>
+        </div>
+
+        <!-- Gross Turnover -->
+        <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
+            <div class="flex items-center justify-between text-slate-500 mb-1">
+                <span class="text-xs font-semibold">Gross Turnover</span>
+                <i data-lucide="indian-rupee" class="w-4 h-4 text-emerald-600"></i>
+            </div>
+            <div class="text-xl font-black text-emerald-600">{{ settings.currency_symbol }}{{ "{:,.2f}".format(kpis.total_sales) }}</div>
+            <div class="text-[11px] text-slate-400 mt-1">Incl. GST & Dispatches</div>
+        </div>
+
+        <!-- Taxable Turnover -->
+        <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
+            <div class="flex items-center justify-between text-slate-500 mb-1">
+                <span class="text-xs font-semibold">Net Taxable Value</span>
+                <i data-lucide="coins" class="w-4 h-4 text-sky-600"></i>
+            </div>
+            <div class="text-xl font-black text-slate-900">{{ settings.currency_symbol }}{{ "{:,.2f}".format(kpis.total_taxable) }}</div>
+            <div class="text-[11px] text-slate-400 mt-1">Excl. GST levy</div>
+        </div>
+
+        <!-- Output GST -->
+        <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
+            <div class="flex items-center justify-between text-slate-500 mb-1">
+                <span class="text-xs font-semibold">Output GST Collected</span>
+                <i data-lucide="file-check-2" class="w-4 h-4 text-purple-600"></i>
+            </div>
+            <div class="text-xl font-black text-purple-700">{{ settings.currency_symbol }}{{ "{:,.2f}".format(kpis.total_tax) }}</div>
+            <div class="text-[11px] text-slate-400 mt-1">Payable on GSTR-3B</div>
+        </div>
+
+        <!-- Total Purchase Cost -->
+        <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
+            <div class="flex items-center justify-between text-slate-500 mb-1">
+                <span class="text-xs font-semibold">Cost of Goods (COGS)</span>
+                <i data-lucide="badge-percent" class="w-4 h-4 text-amber-600"></i>
+            </div>
+            <div class="text-xl font-black text-slate-900">{{ settings.currency_symbol }}{{ "{:,.2f}".format(kpis.total_cost) }}</div>
+            <div class="text-[11px] text-slate-400 mt-1">Based on inward cost</div>
+        </div>
+
+        <!-- Gross Margin & Profit -->
+        <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
+            <div class="flex items-center justify-between text-slate-500 mb-1">
+                <span class="text-xs font-semibold">Gross Profit / Margin</span>
+                <i data-lucide="trending-up" class="w-4 h-4 text-emerald-600"></i>
+            </div>
+            <div class="text-xl font-black text-emerald-700">{{ settings.currency_symbol }}{{ "{:,.2f}".format(kpis.total_profit) }}</div>
+            <div class="mt-1">
+                <span class="inline-block px-2 py-0.5 rounded-full text-[10px] font-black {% if kpis.margin_pct >= 20 %}bg-emerald-100 text-emerald-800{% elif kpis.margin_pct >= 10 %}bg-amber-100 text-amber-800{% else %}bg-rose-100 text-rose-800{% endif %}">
+                    {{ kpis.margin_pct }}% Gross Margin
+                </span>
+            </div>
+        </div>
+    </div>
+
+    <!-- View Switcher Tabs: Product-Wise Summary vs Detailed Register -->
+    <div class="flex items-center justify-between border-b border-slate-200">
+        <div class="flex items-center gap-2">
+            <button type="button" onclick="switchView('product')"
+                    class="pb-3 px-3 text-sm font-bold border-b-2 transition flex items-center gap-2 {% if view_type == 'product' %}border-indigo-600 text-indigo-600{% else %}border-transparent text-slate-500 hover:text-slate-800{% endif %}">
+                <i data-lucide="layout-grid" class="w-4 h-4"></i> Product-Wise Summary ({{ product_summary|length }})
+            </button>
+            <button type="button" onclick="switchView('register')"
+                    class="pb-3 px-3 text-sm font-bold border-b-2 transition flex items-center gap-2 {% if view_type == 'register' %}border-indigo-600 text-indigo-600{% else %}border-transparent text-slate-500 hover:text-slate-800{% endif %}">
+                <i data-lucide="list-ordered" class="w-4 h-4"></i> Itemized Sales Register ({{ items|length }})
+            </button>
+        </div>
+        <div class="text-xs text-slate-400 font-medium hidden sm:block">
+            Tip: Switch views to see either aggregated item totals or bill-by-bill line items.
+        </div>
+    </div>
+
+    <!-- VIEW 1: Product-Wise Sales Summary Table -->
+    {% if view_type == 'product' %}
+    <div class="bg-white rounded-3xl border border-slate-200 shadow-xs overflow-hidden">
+        <div class="p-4 bg-slate-50/70 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
+            <div>
+                <h3 class="font-bold text-slate-900 text-sm">Product Sales & Profitability Breakdown</h3>
+                <p class="text-xs text-slate-500">Aggregated quantities, revenue turnover, cost, and gross margins sorted by sales volume.</p>
+            </div>
+            <span class="text-xs font-bold text-slate-600 bg-white px-3 py-1 rounded-full border border-slate-200">
+                {{ product_summary|length }} Products Sold
+            </span>
+        </div>
+
+        <div class="overflow-x-auto">
+            <table class="w-full text-left text-xs">
+                <thead class="bg-slate-100 text-slate-700 font-bold uppercase tracking-wider text-[11px] border-b border-slate-200">
+                    <tr>
+                        <th class="py-3 px-4">#</th>
+                        <th class="py-3 px-4">Product Name & SKU</th>
+                        <th class="py-3 px-4">Category</th>
+                        <th class="py-3 px-4">HSN Code</th>
+                        <th class="py-3 px-4">GST %</th>
+                        <th class="py-3 px-4 text-right">Qty Sold</th>
+                        <th class="py-3 px-4 text-right">Avg Price</th>
+                        <th class="py-3 px-4 text-right">Taxable Value</th>
+                        <th class="py-3 px-4 text-right">Output GST</th>
+                        <th class="py-3 px-4 text-right">Total Revenue</th>
+                        <th class="py-3 px-4 text-right">Est. Cost</th>
+                        <th class="py-3 px-4 text-right">Gross Profit</th>
+                        <th class="py-3 px-4 text-center">Margin %</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100 font-medium text-slate-700">
+                    {% for p in product_summary %}
+                    <tr class="hover:bg-indigo-50/40 transition">
+                        <td class="py-3 px-4 text-slate-400 font-mono">{{ loop.index }}</td>
+                        <td class="py-3 px-4">
+                            <div class="font-bold text-slate-900">{{ p.product_name }}</div>
+                            <span class="font-mono text-[11px] text-slate-500">{{ p.sku }}</span>
+                        </td>
+                        <td class="py-3 px-4">
+                            <span class="px-2 py-0.5 rounded-full text-[10px] font-bold {% if p.category == 'Bags' %}bg-sky-100 text-sky-800{% else %}bg-amber-100 text-amber-800{% endif %}">
+                                {{ p.category }}
+                            </span>
+                        </td>
+                        <td class="py-3 px-4 font-mono font-semibold text-slate-600">{{ p.hsn_code }}</td>
+                        <td class="py-3 px-4 font-mono">{{ "{:g}".format(p.gst_rate) }}%</td>
+                        <td class="py-3 px-4 text-right font-black text-slate-900">{{ "{:,}".format(p.total_qty) }} {{ p.unit }}</td>
+                        <td class="py-3 px-4 text-right font-mono">{{ settings.currency_symbol }}{{ "{:,.2f}".format(p.avg_unit_price) }}</td>
+                        <td class="py-3 px-4 text-right font-mono">{{ settings.currency_symbol }}{{ "{:,.2f}".format(p.total_taxable) }}</td>
+                        <td class="py-3 px-4 text-right font-mono text-purple-700 font-semibold">{{ settings.currency_symbol }}{{ "{:,.2f}".format(p.total_tax) }}</td>
+                        <td class="py-3 px-4 text-right font-mono font-black text-slate-900">{{ settings.currency_symbol }}{{ "{:,.2f}".format(p.total_sales) }}</td>
+                        <td class="py-3 px-4 text-right font-mono text-slate-500">{{ settings.currency_symbol }}{{ "{:,.2f}".format(p.total_cost) }}</td>
+                        <td class="py-3 px-4 text-right font-mono font-bold {% if p.profit >= 0 %}text-emerald-700{% else %}text-rose-600{% endif %}">
+                            {{ settings.currency_symbol }}{{ "{:,.2f}".format(p.profit) }}
+                        </td>
+                        <td class="py-3 px-4 text-center">
+                            <span class="inline-block px-2 py-0.5 rounded-full text-[10px] font-black {% if p.margin_pct >= 20 %}bg-emerald-100 text-emerald-800{% elif p.margin_pct >= 10 %}bg-amber-100 text-amber-800{% else %}bg-rose-100 text-rose-800{% endif %}">
+                                {{ "{:,.1f}".format(p.margin_pct) }}%
+                            </span>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="13" class="py-12 text-center text-slate-400">
+                            <i data-lucide="package-search" class="w-10 h-10 mx-auto text-slate-300 mb-2"></i>
+                            <div class="font-bold text-slate-600">No Sales Found</div>
+                            <p class="text-xs">No product sales match your selected filters and date range.</p>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+                {% if product_summary %}
+                <tfoot class="bg-slate-100 font-black text-slate-900 border-t-2 border-slate-300">
+                    <tr>
+                        <td colspan="5" class="py-3 px-4 uppercase text-slate-800 tracking-wider">Total Sales Summary</td>
+                        <td class="py-3 px-4 text-right">{{ "{:,}".format(kpis.total_qty) }}</td>
+                        <td class="py-3 px-4 text-right">-</td>
+                        <td class="py-3 px-4 text-right font-mono">{{ settings.currency_symbol }}{{ "{:,.2f}".format(kpis.total_taxable) }}</td>
+                        <td class="py-3 px-4 text-right font-mono text-purple-800">{{ settings.currency_symbol }}{{ "{:,.2f}".format(kpis.total_tax) }}</td>
+                        <td class="py-3 px-4 text-right font-mono text-emerald-800">{{ settings.currency_symbol }}{{ "{:,.2f}".format(kpis.total_sales) }}</td>
+                        <td class="py-3 px-4 text-right font-mono text-slate-600">{{ settings.currency_symbol }}{{ "{:,.2f}".format(kpis.total_cost) }}</td>
+                        <td class="py-3 px-4 text-right font-mono text-emerald-800">{{ settings.currency_symbol }}{{ "{:,.2f}".format(kpis.total_profit) }}</td>
+                        <td class="py-3 px-4 text-center">
+                            <span class="inline-block px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-200 text-emerald-900">
+                                {{ kpis.margin_pct }}%
+                            </span>
+                        </td>
+                    </tr>
+                </tfoot>
+                {% endif %}
+            </table>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- VIEW 2: Itemized Sales Register Table -->
+    {% if view_type == 'register' %}
+    <div class="bg-white rounded-3xl border border-slate-200 shadow-xs overflow-hidden">
+        <div class="p-4 bg-slate-50/70 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
+            <div>
+                <h3 class="font-bold text-slate-900 text-sm">Itemized Sales & Invoice Transaction Register</h3>
+                <p class="text-xs text-slate-500">Every single item line sold with invoice number, customer details, HSN code, GST calculation, and salesman.</p>
+            </div>
+            <span class="text-xs font-bold text-slate-600 bg-white px-3 py-1 rounded-full border border-slate-200">
+                {{ items|length }} Items Listed
+            </span>
+        </div>
+
+        <div class="overflow-x-auto">
+            <table class="w-full text-left text-xs">
+                <thead class="bg-slate-100 text-slate-700 font-bold uppercase tracking-wider text-[11px] border-b border-slate-200">
+                    <tr>
+                        <th class="py-3 px-4">Date & Time</th>
+                        <th class="py-3 px-4">Invoice #</th>
+                        <th class="py-3 px-4">Salesman</th>
+                        <th class="py-3 px-4">Customer & Buyer GSTIN</th>
+                        <th class="py-3 px-4">Product & SKU</th>
+                        <th class="py-3 px-4">Category</th>
+                        <th class="py-3 px-4">HSN</th>
+                        <th class="py-3 px-4 text-right">Qty</th>
+                        <th class="py-3 px-4 text-right">Rate</th>
+                        <th class="py-3 px-4 text-right">Taxable</th>
+                        <th class="py-3 px-4 text-right">GST</th>
+                        <th class="py-3 px-4 text-right">Total Price</th>
+                        <th class="py-3 px-4 text-center">Payment</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100 font-medium text-slate-700">
+                    {% for it in items %}
+                    <tr class="hover:bg-indigo-50/40 transition">
+                        <td class="py-3 px-4 whitespace-nowrap text-slate-500 font-mono text-[11px]">
+                            {{ it.created_at[:10] }}<br><span class="text-slate-400">{{ it.created_at[11:16] }}</span>
+                        </td>
+                        <td class="py-3 px-4 whitespace-nowrap">
+                            <span class="font-mono font-bold text-slate-900">{{ it.invoice_no }}</span>
+                            <div class="text-[10px]">
+                                <span class="px-1.5 py-0.2 rounded font-bold {% if it.sale_type == 'WHOLESALE' %}bg-purple-100 text-purple-800{% else %}bg-emerald-100 text-emerald-800{% endif %}">
+                                    {{ it.sale_type }}
+                                </span>
+                            </div>
+                        </td>
+                        <td class="py-3 px-4 whitespace-nowrap font-medium text-slate-700">
+                            {{ it.salesman_name or 'Admin' }}
+                        </td>
+                        <td class="py-3 px-4">
+                            <div class="font-bold text-slate-900">{{ it.customer_name or 'Walk-in Customer' }}</div>
+                            {% if it.customer_phone %}
+                            <div class="text-[11px] text-slate-400 font-mono">{{ it.customer_phone }}</div>
+                            {% endif %}
+                            {% if it.customer_gst %}
+                            <div class="mt-0.5">
+                                <span class="px-1.5 py-0.5 rounded font-mono font-bold text-[10px] bg-purple-100 text-purple-900">
+                                    GSTIN: {{ it.customer_gst }}
+                                </span>
+                            </div>
+                            {% endif %}
+                        </td>
+                        <td class="py-3 px-4">
+                            <div class="font-bold text-slate-900">{{ it.product_name }}</div>
+                            <span class="font-mono text-[11px] text-slate-500">{{ it.sku }}</span>
+                            {% if it.size or it.color %}
+                            <span class="text-[10px] text-slate-400">({{ it.size }} / {{ it.color }})</span>
+                            {% endif %}
+                        </td>
+                        <td class="py-3 px-4 whitespace-nowrap">
+                            <span class="px-2 py-0.5 rounded-full text-[10px] font-bold {% if it.category == 'Bags' %}bg-sky-100 text-sky-800{% else %}bg-amber-100 text-amber-800{% endif %}">
+                                {{ it.category }}
+                            </span>
+                        </td>
+                        <td class="py-3 px-4 font-mono font-semibold text-slate-600">{{ it.hsn_code }}</td>
+                        <td class="py-3 px-4 text-right font-black text-slate-900">{{ it.quantity }} {{ it.unit or 'Pairs' }}</td>
+                        <td class="py-3 px-4 text-right font-mono">{{ settings.currency_symbol }}{{ "{:,.2f}".format(it.unit_price) }}</td>
+                        <td class="py-3 px-4 text-right font-mono">{{ settings.currency_symbol }}{{ "{:,.2f}".format(it.taxable_amount or (it.total_price / 1.18)) }}</td>
+                        <td class="py-3 px-4 text-right font-mono text-purple-700">
+                            <div>{{ settings.currency_symbol }}{{ "{:,.2f}".format(it.tax_amount or (it.total_price - (it.total_price / 1.18))) }}</div>
+                            <span class="text-[10px] text-slate-400">({{ "{:g}".format(it.gst_rate or 18) }}%)</span>
+                        </td>
+                        <td class="py-3 px-4 text-right font-mono font-black text-slate-900">{{ settings.currency_symbol }}{{ "{:,.2f}".format(it.total_price) }}</td>
+                        <td class="py-3 px-4 text-center whitespace-nowrap">
+                            <span class="px-2 py-0.5 rounded-md font-bold text-[10px] bg-slate-100 text-slate-800 border border-slate-200">
+                                {{ it.payment_mode or 'CASH' }}
+                            </span>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="13" class="py-12 text-center text-slate-400">
+                            <i data-lucide="receipt" class="w-10 h-10 mx-auto text-slate-300 mb-2"></i>
+                            <div class="font-bold text-slate-600">No Transaction Records Found</div>
+                            <p class="text-xs">Try selecting a wider date range or clearing filters.</p>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+                {% if items %}
+                <tfoot class="bg-slate-100 font-black text-slate-900 border-t-2 border-slate-300">
+                    <tr>
+                        <td colspan="7" class="py-3 px-4 uppercase text-slate-800 tracking-wider">Total ({{ items|length }} Items)</td>
+                        <td class="py-3 px-4 text-right">{{ "{:,}".format(kpis.total_qty) }}</td>
+                        <td class="py-3 px-4 text-right">-</td>
+                        <td class="py-3 px-4 text-right font-mono">{{ settings.currency_symbol }}{{ "{:,.2f}".format(kpis.total_taxable) }}</td>
+                        <td class="py-3 px-4 text-right font-mono text-purple-800">{{ settings.currency_symbol }}{{ "{:,.2f}".format(kpis.total_tax) }}</td>
+                        <td class="py-3 px-4 text-right font-mono text-emerald-800">{{ settings.currency_symbol }}{{ "{:,.2f}".format(kpis.total_sales) }}</td>
+                        <td class="py-3 px-4 text-center">-</td>
+                    </tr>
+                </tfoot>
+                {% endif %}
+            </table>
+        </div>
+    </div>
+    {% endif %}
+
+</div>
+
+<script>
+function switchView(mode) {
+    document.getElementById('viewInput').value = mode;
+    document.getElementById('filterForm').submit();
+}
+
+function setPreset(range) {
+    const today = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    const fmt = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+
+    let start = '', end = '';
+
+    if (range === 'today') {
+        start = fmt(today);
+        end = fmt(today);
+    } else if (range === 'yesterday') {
+        const yest = new Date(today);
+        yest.setDate(yest.getDate() - 1);
+        start = fmt(yest);
+        end = fmt(yest);
+    } else if (range === 'this_week') {
+        const day = today.getDay();
+        const diff = today.getDate() - day + (day === 0 ? -6 : 1); // Monday
+        const monday = new Date(today.setDate(diff));
+        start = fmt(monday);
+        end = fmt(new Date());
+    } else if (range === 'this_month') {
+        const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
+        start = fmt(firstDay);
+        end = fmt(today);
+    } else if (range === 'last_month') {
+        const firstDay = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+        const lastDay = new Date(today.getFullYear(), today.getMonth(), 0);
+        start = fmt(firstDay);
+        end = fmt(lastDay);
+    } else if (range === 'fy') {
+        // Indian Financial Year 2026-27 (1 Apr 2026 to 31 Mar 2027)
+        start = '2026-04-01';
+        end = '2027-03-31';
+    } else if (range === 'all') {
+        start = '';
+        end = '';
+    }
+
+    document.getElementById('start_date').value = start;
+    document.getElementById('end_date').value = end;
+    document.getElementById('filterForm').submit();
+}
+</script>
+{% endblock %}

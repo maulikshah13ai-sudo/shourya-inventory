@@ -10,8 +10,9 @@ from waitress import serve
 from app import app, get_local_ip
 
 def main():
+    import os
     local_ip = get_local_ip()
-    port = 5000
+    port = int(os.environ.get('PORT', 5000))
 
     print("=" * 70)
     print("  BAGS & FOOTWEAR WHOLESALE + RETAIL INVENTORY SYSTEM (PRODUCTION)")
