@@ -938,3 +938,501 @@ def generate_gstr3b_summary_data(conn, start_date=None, end_date=None):
             'total': net_total_payable
         }
     }
+
+
+# ----------------- COMPREHENSIVE PRODUCT-WISE & ADVANCED REPORTS -----------------
+
+def generate_sales_report_excel(conn, start_date=None, end_date=None, product_id=None, category=None, payment_mode=None, salesman_id=None, sale_type=None, search=None):
+    """
+    Generates a formatted 2-Sheet Excel Sales Report:
+    - Sheet 1: Product-Wise Sales Analysis (Aggregated Units, Turnover, Cost, Gross Margin, Margin %)
+    - Sheet 2: Itemized Sales Register (Line-by-line transactions with GST & Customer details)
+    """
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM settings ORDER BY id ASC LIMIT 1")
+    settings = dict(cur.fetchone()) if cur.rowcount != 0 else {}
+    shop_name = settings.get('shop_name', 'SSIPL Bags & Footwear Hub')
+
+    # Base query for itemized records
+    item_query = """
+        SELECT 
+            si.id, si.sale_id, si.product_id, si.product_name, si.sku, si.size, si.color, si.unit,
+            si.quantity, si.unit_price, si.cost_price, si.total_price, si.hsn_code, si.gst_rate,
+            si.taxable_amount, si.cgst_amount, si.sgst_amount, si.igst_amount, si.tax_amount,
+            s.invoice_no, s.sale_type, s.customer_name, s.customer_phone,
+            COALESCE(NULLIF(s.customer_gst, ''), p.gst_no, '') as customer_gst,
+            s.payment_mode, s.payment_status, s.salesman_name,
+            s.created_at, s.is_interstate,
+            COALESCE(prod.category, 'Bags') as category
+        FROM sale_items si
+        JOIN sales s ON si.sale_id = s.id
+        LEFT JOIN parties p ON s.party_id = p.id
+        LEFT JOIN products prod ON si.product_id = prod.id
+        WHERE 1=1
+    """
+    params = []
+
+    if start_date:
+        item_query += " AND DATE(s.created_at) >= ?"
+        params.append(start_date)
+    if end_date:
+        item_query += " AND DATE(s.created_at) <= ?"
+        params.append(end_date)
+    if product_id:
+        item_query += " AND si.product_id = ?"
+        params.append(product_id)
+    if category:
+        item_query += " AND LOWER(prod.category) = LOWER(?)"
+        params.append(category)
+    if payment_mode:
+        item_query += " AND s.payment_mode = ?"
+        params.append(payment_mode)
+    if salesman_id:
+        item_query += " AND s.salesman_id = ?"
+        params.append(salesman_id)
+    if sale_type:
+        item_query += " AND s.sale_type = ?"
+        params.append(sale_type)
+    if search:
+        item_query += " AND (s.invoice_no LIKE ? OR s.customer_name LIKE ? OR si.product_name LIKE ? OR si.sku LIKE ?)"
+        term = f"%{search}%"
+        params.extend([term, term, term, term])
+
+    item_query += " ORDER BY s.id DESC, si.id ASC"
+    cur.execute(item_query, params)
+    raw_items = [dict(r) for r in cur.fetchall()]
+
+    # Aggregated Product-Wise Summary
+    summary_map = {}
+    for it in raw_items:
+        key = (it['product_id'], it['sku'], it['product_name'])
+        if key not in summary_map:
+            summary_map[key] = {
+                'sku': it['sku'],
+                'product_name': it['product_name'],
+                'category': it['category'],
+                'hsn_code': it['hsn_code'] or ('4202' if 'bag' in it['category'].lower() else '6404'),
+                'gst_rate': it['gst_rate'] or 18.0,
+                'unit': it['unit'] or 'Pairs',
+                'total_qty': 0,
+                'total_sales': 0.0,
+                'total_taxable': 0.0,
+                'total_tax': 0.0,
+                'total_cost': 0.0
+            }
+        qty = int(it['quantity'] or 0)
+        tot_p = float(it['total_price'] or 0.0)
+        taxable = float(it['taxable_amount'] or (tot_p / 1.18))
+        tax = float(it['tax_amount'] or (tot_p - taxable))
+        cost = float(it['cost_price'] or 0.0) * qty
+
+        summary_map[key]['total_qty'] += qty
+        summary_map[key]['total_sales'] += tot_p
+        summary_map[key]['total_taxable'] += taxable
+        summary_map[key]['total_tax'] += tax
+        summary_map[key]['total_cost'] += cost
+
+    product_summary = list(summary_map.values())
+    product_summary.sort(key=lambda x: x['total_sales'], reverse=True)
+
+    # Build Excel Workbook
+    wb = openpyxl.Workbook()
+
+    # --- TAB 1: PRODUCT-WISE SALES ANALYSIS ---
+    ws_prod = wb.active
+    ws_prod.title = "Product Sales Summary"
+    ws_prod.views.sheetView[0].showGridLines = True
+
+    title_font = Font(name="Calibri", size=14, bold=True, color="1E293B")
+    subtitle_font = Font(name="Calibri", size=10, italic=True, color="64748B")
+    header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
+    bold_font = Font(name="Calibri", size=11, bold=True)
+    regular_font = Font(name="Calibri", size=11)
+
+    fill_header = PatternFill(start_color="0F766E", end_color="0F766E", fill_type="solid") # Dark Teal
+    fill_total = PatternFill(start_color="F1F5F9", end_color="F1F5F9", fill_type="solid")
+
+    ws_prod.append([f"{shop_name} - PRODUCT-WISE SALES REPORT"])
+    ws_prod.cell(row=1, column=1).font = title_font
+    period_str = f"Period: {start_date or 'Beginning'} to {end_date or 'Current'}"
+    if sale_type: period_str += f" | Mode: {sale_type}"
+    if payment_mode: period_str += f" | Payment: {payment_mode}"
+    ws_prod.append([period_str])
+    ws_prod.cell(row=2, column=1).font = subtitle_font
+    ws_prod.append([])
+
+    prod_headers = [
+        "SKU", "Product Name", "Category", "HSN Code", "GST %", "Total Units Sold", "UOM",
+        "Avg Selling Price (₹)", "Total Turnover (₹)", "Taxable Value (₹)", "Output GST (₹)",
+        "Est. Cost (₹)", "Gross Margin (₹)", "Margin %"
+    ]
+    ws_prod.append(prod_headers)
+    for col_idx in range(1, len(prod_headers) + 1):
+        cell = ws_prod.cell(row=4, column=col_idx)
+        cell.fill = fill_header
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal="center" if col_idx in (1, 3, 4, 5, 7) else ("right" if col_idx >= 6 else "left"), vertical="center")
+        cell.border = THIN_BORDER
+    ws_prod.row_dimensions[4].height = 26
+
+    row_num = 5
+    tot_sum_qty = 0
+    tot_sum_sales = 0.0
+    tot_sum_taxable = 0.0
+    tot_sum_tax = 0.0
+    tot_sum_cost = 0.0
+
+    for p in product_summary:
+        avg_price = (p['total_sales'] / p['total_qty']) if p['total_qty'] > 0 else 0.0
+        profit = p['total_sales'] - p['total_cost']
+        margin_pct = (profit / p['total_sales'] * 100.0) if p['total_sales'] > 0 else 0.0
+
+        tot_sum_qty += p['total_qty']
+        tot_sum_sales += p['total_sales']
+        tot_sum_taxable += p['total_taxable']
+        tot_sum_tax += p['total_tax']
+        tot_sum_cost += p['total_cost']
+
+        ws_prod.append([
+            p['sku'], p['product_name'], p['category'], p['hsn_code'], p['gst_rate'],
+            p['total_qty'], p['unit'], round(avg_price, 2), round(p['total_sales'], 2),
+            round(p['total_taxable'], 2), round(p['total_tax'], 2), round(p['total_cost'], 2),
+            round(profit, 2), round(margin_pct, 1)
+        ])
+        for c in range(1, len(prod_headers) + 1):
+            cell = ws_prod.cell(row=row_num, column=c)
+            cell.font = regular_font
+            cell.border = THIN_BORDER
+            if c in (8, 9, 10, 11, 12, 13):
+                cell.number_format = "#,##0.00"
+            elif c == 14:
+                cell.number_format = '0.0"%"'
+            elif c in (5, 6):
+                cell.number_format = "#,##0"
+        row_num += 1
+
+    # Total row
+    tot_profit = tot_sum_sales - tot_sum_cost
+    tot_margin_pct = (tot_profit / tot_sum_sales * 100.0) if tot_sum_sales > 0 else 0.0
+    ws_prod.append([
+        "TOTAL", f"{len(product_summary)} Products", "", "", "",
+        tot_sum_qty, "", "", round(tot_sum_sales, 2), round(tot_sum_taxable, 2),
+        round(tot_sum_tax, 2), round(tot_sum_cost, 2), round(tot_profit, 2), round(tot_margin_pct, 1)
+    ])
+    for c in range(1, len(prod_headers) + 1):
+        cell = ws_prod.cell(row=row_num, column=c)
+        cell.font = bold_font
+        cell.fill = fill_total
+        cell.border = THIN_BORDER
+        if c in (8, 9, 10, 11, 12, 13):
+            cell.number_format = "#,##0.00"
+        elif c == 14:
+            cell.number_format = '0.0"%"'
+
+    # Auto-fit columns
+    for col in ws_prod.columns:
+        max_len = max(len(str(cell.value or '')) for cell in col)
+        col_letter = get_column_letter(col[0].column)
+        ws_prod.column_dimensions[col_letter].width = max(max_len + 3, 11)
+
+    # --- TAB 2: DETAILED SALES REGISTER (ITEMIZED) ---
+    ws_reg = wb.create_sheet(title="Itemized Sales Register")
+    ws_reg.views.sheetView[0].showGridLines = True
+
+    fill_reg = PatternFill(start_color="1E293B", end_color="1E293B", fill_type="solid") # Dark Slate
+    ws_reg.append([f"{shop_name} - DETAILED SALES REGISTER"])
+    ws_reg.cell(row=1, column=1).font = title_font
+    ws_reg.append([f"Item-by-item sales ledger with full GST breakdown | {period_str}"])
+    ws_reg.cell(row=2, column=1).font = subtitle_font
+    ws_reg.append([])
+
+    reg_headers = [
+        "Date", "Invoice #", "Salesman", "Sale Type", "Customer Name", "Phone", "Buyer GSTIN",
+        "Payment Mode", "Payment Status", "SKU", "Product Name", "Category", "Size", "Color",
+        "HSN Code", "GST %", "Qty", "Unit", "Unit Price (₹)", "Line Total (₹)", "Taxable Value (₹)",
+        "CGST (₹)", "SGST (₹)", "IGST (₹)", "Total Tax (₹)"
+    ]
+    ws_reg.append(reg_headers)
+    for col_idx in range(1, len(reg_headers) + 1):
+        cell = ws_reg.cell(row=4, column=col_idx)
+        cell.fill = fill_reg
+        cell.font = header_font
+        cell.border = THIN_BORDER
+        cell.alignment = Alignment(horizontal="center" if col_idx in (1, 2, 4, 8, 9, 10, 12, 13, 14, 15, 16, 18) else ("right" if col_idx >= 17 else "left"), vertical="center")
+    ws_reg.row_dimensions[4].height = 26
+
+    row_idx = 5
+    for it in raw_items:
+        date_str = str(it['created_at'])[:10] if it.get('created_at') else ''
+        ws_reg.append([
+            date_str, it['invoice_no'], it['salesman_name'] or 'Staff', it['sale_type'],
+            it['customer_name'], it['customer_phone'] or '', it['customer_gst'] or '',
+            it['payment_mode'], it['payment_status'], it['sku'], it['product_name'],
+            it['category'], it['size'] or '', it['color'] or '', it['hsn_code'] or '',
+            it['gst_rate'] or 18.0, it['quantity'], it['unit'] or 'Pairs',
+            round(float(it['unit_price'] or 0.0), 2), round(float(it['total_price'] or 0.0), 2),
+            round(float(it['taxable_amount'] or 0.0), 2), round(float(it['cgst_amount'] or 0.0), 2),
+            round(float(it['sgst_amount'] or 0.0), 2), round(float(it['igst_amount'] or 0.0), 2),
+            round(float(it['tax_amount'] or 0.0), 2)
+        ])
+        for c in range(1, len(reg_headers) + 1):
+            cell = ws_reg.cell(row=row_idx, column=c)
+            cell.font = regular_font
+            cell.border = THIN_BORDER
+            if c in (19, 20, 21, 22, 23, 24, 25):
+                cell.number_format = "#,##0.00"
+            elif c == 17:
+                cell.number_format = "#,##0"
+        row_idx += 1
+
+    for col in ws_reg.columns:
+        max_len = max(len(str(cell.value or '')) for cell in col)
+        col_letter = get_column_letter(col[0].column)
+        ws_reg.column_dimensions[col_letter].width = max(max_len + 3, 11)
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    filename = f"Sales_Report_{start_date or 'All'}_to_{end_date or 'Current'}.xlsx"
+    return buf.getvalue(), filename, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+def generate_purchase_report_excel(conn, start_date=None, end_date=None, supplier_id=None, product_id=None, category=None, payment_status=None, search=None):
+    """
+    Generates a formatted 2-Sheet Excel Purchase Report:
+    - Sheet 1: Product-Wise Purchase Summary (Inward Units, Cost, Taxable, ITC)
+    - Sheet 2: Detailed Purchase Inward Register (Line-by-line stock-in records with vendor info)
+    """
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM settings ORDER BY id ASC LIMIT 1")
+    settings = dict(cur.fetchone()) if cur.rowcount != 0 else {}
+    shop_name = settings.get('shop_name', 'SSIPL Bags & Footwear Hub')
+
+    pur_query = """
+        SELECT 
+            pi.id, pi.purchase_id, pi.product_id, pi.quantity, pi.unit_cost, pi.total_cost,
+            pi.hsn_code, pi.gst_rate, pi.taxable_amount, pi.tax_amount,
+            p.invoice_no, p.supplier_id, p.supplier_name, p.purchase_date, p.payment_status,
+            p.is_interstate, p.created_at,
+            pty.phone as supplier_phone, pty.gst_no as supplier_gst,
+            COALESCE(prod.name, 'Product #' || pi.product_id) as product_name,
+            COALESCE(prod.sku, 'SKU-' || pi.product_id) as sku,
+            COALESCE(prod.category, 'Bags') as category,
+            COALESCE(prod.unit, 'Pairs') as unit
+        FROM purchase_items pi
+        JOIN purchases p ON pi.purchase_id = p.id
+        LEFT JOIN parties pty ON p.supplier_id = pty.id
+        LEFT JOIN products prod ON pi.product_id = prod.id
+        WHERE 1=1
+    """
+    params = []
+
+    if start_date:
+        pur_query += " AND DATE(p.purchase_date) >= ?"
+        params.append(start_date)
+    if end_date:
+        pur_query += " AND DATE(p.purchase_date) <= ?"
+        params.append(end_date)
+    if supplier_id:
+        pur_query += " AND p.supplier_id = ?"
+        params.append(supplier_id)
+    if product_id:
+        pur_query += " AND pi.product_id = ?"
+        params.append(product_id)
+    if category:
+        pur_query += " AND LOWER(prod.category) = LOWER(?)"
+        params.append(category)
+    if payment_status:
+        pur_query += " AND p.payment_status = ?"
+        params.append(payment_status)
+    if search:
+        pur_query += " AND (p.invoice_no LIKE ? OR p.supplier_name LIKE ? OR prod.name LIKE ? OR prod.sku LIKE ?)"
+        term = f"%{search}%"
+        params.extend([term, term, term, term])
+
+    pur_query += " ORDER BY p.purchase_date DESC, p.id DESC, pi.id ASC"
+    cur.execute(pur_query, params)
+    raw_purchases = [dict(r) for r in cur.fetchall()]
+
+    # Aggregated Product-Wise Summary
+    summary_map = {}
+    for it in raw_purchases:
+        key = (it['product_id'], it['sku'], it['product_name'])
+        if key not in summary_map:
+            summary_map[key] = {
+                'sku': it['sku'],
+                'product_name': it['product_name'],
+                'category': it['category'],
+                'hsn_code': it['hsn_code'] or ('4202' if 'bag' in it['category'].lower() else '6404'),
+                'gst_rate': it['gst_rate'] or 18.0,
+                'unit': it['unit'] or 'Pairs',
+                'total_qty': 0,
+                'total_cost': 0.0,
+                'total_taxable': 0.0,
+                'total_tax': 0.0,
+                'inward_count': 0
+            }
+        qty = int(it['quantity'] or 0)
+        tot_c = float(it['total_cost'] or 0.0)
+        taxable = float(it['taxable_amount'] or (tot_c / 1.18))
+        tax = float(it['tax_amount'] or (tot_c - taxable))
+
+        summary_map[key]['total_qty'] += qty
+        summary_map[key]['total_cost'] += tot_c
+        summary_map[key]['total_taxable'] += taxable
+        summary_map[key]['total_tax'] += tax
+        summary_map[key]['inward_count'] += 1
+
+    product_summary = list(summary_map.values())
+    product_summary.sort(key=lambda x: x['total_cost'], reverse=True)
+
+    # Build Excel Workbook
+    wb = openpyxl.Workbook()
+
+    title_font = Font(name="Calibri", size=14, bold=True, color="1E293B")
+    subtitle_font = Font(name="Calibri", size=10, italic=True, color="64748B")
+    header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
+    bold_font = Font(name="Calibri", size=11, bold=True)
+    regular_font = Font(name="Calibri", size=11)
+
+    fill_pur_header = PatternFill(start_color="1E3A8A", end_color="1E3A8A", fill_type="solid") # Dark Blue
+    fill_total = PatternFill(start_color="F1F5F9", end_color="F1F5F9", fill_type="solid")
+
+    # --- TAB 1: PRODUCT PURCHASE SUMMARY ---
+    ws_prod = wb.active
+    ws_prod.title = "Product Purchase Summary"
+    ws_prod.views.sheetView[0].showGridLines = True
+
+    ws_prod.append([f"{shop_name} - PRODUCT-WISE PURCHASE REPORT"])
+    ws_prod.cell(row=1, column=1).font = title_font
+    period_str = f"Period: {start_date or 'Beginning'} to {end_date or 'Current'}"
+    if payment_status: period_str += f" | Status: {payment_status}"
+    ws_prod.append([period_str])
+    ws_prod.cell(row=2, column=1).font = subtitle_font
+    ws_prod.append([])
+
+    prod_headers = [
+        "SKU", "Product Name", "Category", "HSN Code", "GST %", "Total Units Inward", "UOM",
+        "Avg Unit Cost (₹)", "Total Purchase Cost (₹)", "Taxable Value (₹)", "Input GST / ITC (₹)", "Inward Batches"
+    ]
+    ws_prod.append(prod_headers)
+    for col_idx in range(1, len(prod_headers) + 1):
+        cell = ws_prod.cell(row=4, column=col_idx)
+        cell.fill = fill_pur_header
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal="center" if col_idx in (1, 3, 4, 5, 7, 12) else ("right" if col_idx >= 6 else "left"), vertical="center")
+        cell.border = THIN_BORDER
+    ws_prod.row_dimensions[4].height = 26
+
+    row_num = 5
+    tot_qty = 0
+    tot_cost = 0.0
+    tot_taxable = 0.0
+    tot_itc = 0.0
+
+    for p in product_summary:
+        avg_cost = (p['total_cost'] / p['total_qty']) if p['total_qty'] > 0 else 0.0
+        tot_qty += p['total_qty']
+        tot_cost += p['total_cost']
+        tot_taxable += p['total_taxable']
+        tot_itc += p['total_tax']
+
+        ws_prod.append([
+            p['sku'], p['product_name'], p['category'], p['hsn_code'], p['gst_rate'],
+            p['total_qty'], p['unit'], round(avg_cost, 2), round(p['total_cost'], 2),
+            round(p['total_taxable'], 2), round(p['total_tax'], 2), p['inward_count']
+        ])
+        for c in range(1, len(prod_headers) + 1):
+            cell = ws_prod.cell(row=row_num, column=c)
+            cell.font = regular_font
+            cell.border = THIN_BORDER
+            if c in (8, 9, 10, 11):
+                cell.number_format = "#,##0.00"
+            elif c in (5, 6, 12):
+                cell.number_format = "#,##0"
+        row_num += 1
+
+    # Total Row
+    ws_prod.append([
+        "TOTAL", f"{len(product_summary)} Products", "", "", "",
+        tot_qty, "", "", round(tot_cost, 2), round(tot_taxable, 2),
+        round(tot_itc, 2), len(raw_purchases)
+    ])
+    for c in range(1, len(prod_headers) + 1):
+        cell = ws_prod.cell(row=row_num, column=c)
+        cell.font = bold_font
+        cell.fill = fill_total
+        cell.border = THIN_BORDER
+        if c in (8, 9, 10, 11):
+            cell.number_format = "#,##0.00"
+
+    for col in ws_prod.columns:
+        max_len = max(len(str(cell.value or '')) for cell in col)
+        col_letter = get_column_letter(col[0].column)
+        ws_prod.column_dimensions[col_letter].width = max(max_len + 3, 11)
+
+    # --- TAB 2: DETAILED PURCHASE REGISTER ---
+    ws_reg = wb.create_sheet(title="Detailed Purchase Register")
+    ws_reg.views.sheetView[0].showGridLines = True
+
+    fill_reg = PatternFill(start_color="334155", end_color="334155", fill_type="solid")
+    ws_reg.append([f"{shop_name} - DETAILED PURCHASE REGISTER"])
+    ws_reg.cell(row=1, column=1).font = title_font
+    ws_reg.append([f"Stock-in purchase ledger with vendor & tax details | {period_str}"])
+    ws_reg.cell(row=2, column=1).font = subtitle_font
+    ws_reg.append([])
+
+    reg_headers = [
+        "Purchase Date", "Bill / Ref #", "Vendor / Supplier Name", "Vendor Phone", "Vendor GSTIN",
+        "Payment Status", "SKU", "Product Name", "Category", "HSN Code", "GST %", "Quantity",
+        "Unit", "Unit Cost (₹)", "Total Value (₹)", "Taxable Value (₹)", "CGST (₹)", "SGST (₹)", "IGST (₹)", "ITC Tax (₹)"
+    ]
+    ws_reg.append(reg_headers)
+    for col_idx in range(1, len(reg_headers) + 1):
+        cell = ws_reg.cell(row=4, column=col_idx)
+        cell.fill = fill_reg
+        cell.font = header_font
+        cell.border = THIN_BORDER
+        cell.alignment = Alignment(horizontal="center" if col_idx in (1, 2, 6, 7, 9, 10, 11, 13) else ("right" if col_idx >= 12 else "left"), vertical="center")
+    ws_reg.row_dimensions[4].height = 26
+
+    row_idx = 5
+    for it in raw_purchases:
+        is_inter = bool(it.get('is_interstate', 0))
+        tot_v = float(it['total_cost'] or 0.0)
+        taxable_v = float(it['taxable_amount'] or (tot_v / 1.18))
+        tax_v = float(it['tax_amount'] or (tot_v - taxable_v))
+
+        cgst_v = 0.0 if is_inter else round(tax_v / 2.0, 2)
+        sgst_v = 0.0 if is_inter else round(tax_v - cgst_v, 2)
+        igst_v = tax_v if is_inter else 0.0
+
+        ws_reg.append([
+            str(it['purchase_date'])[:10], it['invoice_no'], it['supplier_name'],
+            it['supplier_phone'] or '', it['supplier_gst'] or '', it['payment_status'],
+            it['sku'], it['product_name'], it['category'], it['hsn_code'] or '',
+            it['gst_rate'] or 18.0, it['quantity'], it['unit'] or 'Pairs',
+            round(float(it['unit_cost'] or 0.0), 2), round(tot_v, 2), round(taxable_v, 2),
+            cgst_v, sgst_v, igst_v, round(tax_v, 2)
+        ])
+        for c in range(1, len(reg_headers) + 1):
+            cell = ws_reg.cell(row=row_idx, column=c)
+            cell.font = regular_font
+            cell.border = THIN_BORDER
+            if c in (14, 15, 16, 17, 18, 19, 20):
+                cell.number_format = "#,##0.00"
+            elif c in (11, 12):
+                cell.number_format = "#,##0"
+        row_idx += 1
+
+    for col in ws_reg.columns:
+        max_len = max(len(str(cell.value or '')) for cell in col)
+        col_letter = get_column_letter(col[0].column)
+        ws_reg.column_dimensions[col_letter].width = max(max_len + 3, 11)
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    filename = f"Purchase_Report_{start_date or 'All'}_to_{end_date or 'Current'}.xlsx"
+    return buf.getvalue(), filename, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+

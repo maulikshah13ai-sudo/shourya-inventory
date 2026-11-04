@@ -2011,6 +2011,506 @@ def export_gstr1():
 
     return send_file(io.BytesIO(file_bytes), mimetype=mimetype, as_attachment=True, download_name=filename)
 
+
+# ----------------- COMPREHENSIVE PRODUCT-WISE & ADVANCED REPORTS -----------------
+
+@app.route('/reports')
+@login_required
+@role_required(['ADMIN', 'ACCOUNTING', 'SALESMAN'])
+def reports_hub():
+    return redirect(url_for('sales_report'))
+
+
+@app.route('/reports/sales')
+@login_required
+@role_required(['ADMIN', 'ACCOUNTING', 'SALESMAN'])
+def sales_report():
+    start_date = request.args.get('start_date', '')
+    end_date = request.args.get('end_date', '')
+    product_id = request.args.get('product_id', '')
+    category = request.args.get('category', '')
+    payment_mode = request.args.get('payment_mode', '')
+    salesman_id = request.args.get('salesman_id', '')
+    sale_type = request.args.get('sale_type', '')
+    search = request.args.get('search', '').strip()
+    view_type = request.args.get('view', 'product') # 'product' or 'register'
+
+    # Default to current month if no dates selected
+    if not start_date and not end_date:
+        today = date.today()
+        start_date = today.replace(day=1).isoformat()
+        end_date = today.isoformat()
+
+    conn = get_connection()
+    cur = conn.cursor()
+
+    # Get filter dropdown options
+    cur.execute("SELECT id, name, sku FROM products ORDER BY name ASC")
+    products_list = [dict(r) for r in cur.fetchall()]
+
+    cur.execute("SELECT id, full_name, username FROM users WHERE role IN ('SALESMAN', 'ADMIN', 'ACCOUNTING') ORDER BY full_name ASC")
+    salesmen_list = [dict(r) for r in cur.fetchall()]
+
+    cur.execute("SELECT DISTINCT payment_mode FROM sales WHERE payment_mode IS NOT NULL AND payment_mode != '' ORDER BY payment_mode ASC")
+    payment_modes = [r[0] for r in cur.fetchall()]
+
+    # Query itemized sales
+    item_query = """
+        SELECT 
+            si.id, si.sale_id, si.product_id, si.product_name, si.sku, si.size, si.color, si.unit,
+            si.quantity, si.unit_price, si.cost_price, si.total_price, si.hsn_code, si.gst_rate,
+            si.taxable_amount, si.cgst_amount, si.sgst_amount, si.igst_amount, si.tax_amount,
+            s.invoice_no, s.sale_type, s.customer_name, s.customer_phone,
+            COALESCE(NULLIF(s.customer_gst, ''), p.gst_no, '') as customer_gst,
+            s.payment_mode, s.payment_status, s.salesman_name,
+            s.created_at, s.is_interstate,
+            COALESCE(prod.category, 'Bags') as category
+        FROM sale_items si
+        JOIN sales s ON si.sale_id = s.id
+        LEFT JOIN parties p ON s.party_id = p.id
+        LEFT JOIN products prod ON si.product_id = prod.id
+        WHERE 1=1
+    """
+    params = []
+    if start_date:
+        item_query += " AND DATE(s.created_at) >= ?"
+        params.append(start_date)
+    if end_date:
+        item_query += " AND DATE(s.created_at) <= ?"
+        params.append(end_date)
+    if product_id:
+        item_query += " AND si.product_id = ?"
+        params.append(product_id)
+    if category:
+        item_query += " AND LOWER(prod.category) = LOWER(?)"
+        params.append(category)
+    if payment_mode:
+        item_query += " AND s.payment_mode = ?"
+        params.append(payment_mode)
+    if salesman_id:
+        item_query += " AND s.salesman_id = ?"
+        params.append(salesman_id)
+    if sale_type:
+        item_query += " AND s.sale_type = ?"
+        params.append(sale_type)
+    if search:
+        item_query += " AND (s.invoice_no LIKE ? OR s.customer_name LIKE ? OR si.product_name LIKE ? OR si.sku LIKE ?)"
+        term = f"%{search}%"
+        params.extend([term, term, term, term])
+
+    item_query += " ORDER BY s.id DESC, si.id ASC"
+    cur.execute(item_query, params)
+    raw_items = [dict(r) for r in cur.fetchall()]
+
+    # Aggregated Product-Wise Summary & KPIs
+    summary_map = {}
+    tot_qty = 0
+    tot_sales = 0.0
+    tot_taxable = 0.0
+    tot_tax = 0.0
+    tot_cost = 0.0
+    invoices_set = set()
+
+    for it in raw_items:
+        key = (it['product_id'], it['sku'], it['product_name'])
+        if key not in summary_map:
+            summary_map[key] = {
+                'product_id': it['product_id'],
+                'sku': it['sku'],
+                'product_name': it['product_name'],
+                'category': it['category'],
+                'hsn_code': it['hsn_code'] or ('4202' if 'bag' in it['category'].lower() else '6404'),
+                'gst_rate': it['gst_rate'] or 18.0,
+                'unit': it['unit'] or 'Pairs',
+                'total_qty': 0,
+                'total_sales': 0.0,
+                'total_taxable': 0.0,
+                'total_tax': 0.0,
+                'total_cost': 0.0,
+                'orders_count': 0
+            }
+        q = int(it['quantity'] or 0)
+        p_val = float(it['total_price'] or 0.0)
+        taxable_v = float(it['taxable_amount'] or (p_val / 1.18))
+        tax_v = float(it['tax_amount'] or (p_val - taxable_v))
+        c_val = float(it['cost_price'] or 0.0) * q
+
+        summary_map[key]['total_qty'] += q
+        summary_map[key]['total_sales'] += p_val
+        summary_map[key]['total_taxable'] += taxable_v
+        summary_map[key]['total_tax'] += tax_v
+        summary_map[key]['total_cost'] += c_val
+        summary_map[key]['orders_count'] += 1
+
+        tot_qty += q
+        tot_sales += p_val
+        tot_taxable += taxable_v
+        tot_tax += tax_v
+        tot_cost += c_val
+        invoices_set.add(it['invoice_no'])
+
+    product_summary = list(summary_map.values())
+    for p in product_summary:
+        p['avg_unit_price'] = (p['total_sales'] / p['total_qty']) if p['total_qty'] > 0 else 0.0
+        p['profit'] = p['total_sales'] - p['total_cost']
+        p['margin_pct'] = (p['profit'] / p['total_sales'] * 100.0) if p['total_sales'] > 0 else 0.0
+
+    product_summary.sort(key=lambda x: x['total_sales'], reverse=True)
+
+    tot_profit = tot_sales - tot_cost
+    tot_margin_pct = (tot_profit / tot_sales * 100.0) if tot_sales > 0 else 0.0
+
+    kpis = {
+        'total_qty': tot_qty,
+        'total_sales': round(tot_sales, 2),
+        'total_taxable': round(tot_taxable, 2),
+        'total_tax': round(tot_tax, 2),
+        'total_cost': round(tot_cost, 2),
+        'total_profit': round(tot_profit, 2),
+        'margin_pct': round(tot_margin_pct, 1),
+        'invoices_count': len(invoices_set),
+        'items_count': len(raw_items)
+    }
+
+    settings_data = get_settings()
+    conn.close()
+
+    return render_template('reports_sales.html',
+                           product_summary=product_summary,
+                           items=raw_items,
+                           kpis=kpis,
+                           products_list=products_list,
+                           salesmen_list=salesmen_list,
+                           payment_modes=payment_modes,
+                           start_date=start_date,
+                           end_date=end_date,
+                           product_id=product_id,
+                           category=category,
+                           payment_mode=payment_mode,
+                           salesman_id=salesman_id,
+                           sale_type=sale_type,
+                           search=search,
+                           view_type=view_type,
+                           settings=settings_data)
+
+
+@app.route('/reports/purchases')
+@login_required
+@role_required(['ADMIN', 'ACCOUNTING', 'WAREHOUSE'])
+def purchase_report():
+    start_date = request.args.get('start_date', '')
+    end_date = request.args.get('end_date', '')
+    supplier_id = request.args.get('supplier_id', '')
+    product_id = request.args.get('product_id', '')
+    category = request.args.get('category', '')
+    payment_status = request.args.get('payment_status', '')
+    search = request.args.get('search', '').strip()
+    view_type = request.args.get('view', 'product') # 'product' or 'register'
+
+    if not start_date and not end_date:
+        today = date.today()
+        start_date = today.replace(day=1).isoformat()
+        end_date = today.isoformat()
+
+    conn = get_connection()
+    cur = conn.cursor()
+
+    # Get dropdown options
+    cur.execute("SELECT id, name, sku FROM products ORDER BY name ASC")
+    products_list = [dict(r) for r in cur.fetchall()]
+
+    cur.execute("SELECT DISTINCT id, name FROM parties WHERE party_type = 'SUPPLIER' ORDER BY name ASC")
+    suppliers_list = [dict(r) for r in cur.fetchall()]
+
+    pur_query = """
+        SELECT 
+            pi.id, pi.purchase_id, pi.product_id, pi.quantity, pi.unit_cost, pi.total_cost,
+            pi.hsn_code, pi.gst_rate, pi.taxable_amount, pi.tax_amount,
+            p.invoice_no, p.supplier_id, p.supplier_name, p.purchase_date, p.payment_status,
+            p.is_interstate, p.created_at,
+            pty.phone as supplier_phone, pty.gst_no as supplier_gst,
+            COALESCE(prod.name, 'Product #' || pi.product_id) as product_name,
+            COALESCE(prod.sku, 'SKU-' || pi.product_id) as sku,
+            COALESCE(prod.category, 'Bags') as category,
+            COALESCE(prod.unit, 'Pairs') as unit
+        FROM purchase_items pi
+        JOIN purchases p ON pi.purchase_id = p.id
+        LEFT JOIN parties pty ON p.supplier_id = pty.id
+        LEFT JOIN products prod ON pi.product_id = prod.id
+        WHERE 1=1
+    """
+    params = []
+
+    if start_date:
+        pur_query += " AND DATE(p.purchase_date) >= ?"
+        params.append(start_date)
+    if end_date:
+        pur_query += " AND DATE(p.purchase_date) <= ?"
+        params.append(end_date)
+    if supplier_id:
+        pur_query += " AND p.supplier_id = ?"
+        params.append(supplier_id)
+    if product_id:
+        pur_query += " AND pi.product_id = ?"
+        params.append(product_id)
+    if category:
+        pur_query += " AND LOWER(prod.category) = LOWER(?)"
+        params.append(category)
+    if payment_status:
+        pur_query += " AND p.payment_status = ?"
+        params.append(payment_status)
+    if search:
+        pur_query += " AND (p.invoice_no LIKE ? OR p.supplier_name LIKE ? OR prod.name LIKE ? OR prod.sku LIKE ?)"
+        term = f"%{search}%"
+        params.extend([term, term, term, term])
+
+    pur_query += " ORDER BY p.purchase_date DESC, p.id DESC, pi.id ASC"
+    cur.execute(pur_query, params)
+    raw_purchases = [dict(r) for r in cur.fetchall()]
+
+    summary_map = {}
+    tot_qty = 0
+    tot_cost = 0.0
+    tot_taxable = 0.0
+    tot_itc = 0.0
+    bills_set = set()
+
+    for it in raw_purchases:
+        key = (it['product_id'], it['sku'], it['product_name'])
+        if key not in summary_map:
+            summary_map[key] = {
+                'product_id': it['product_id'],
+                'sku': it['sku'],
+                'product_name': it['product_name'],
+                'category': it['category'],
+                'hsn_code': it['hsn_code'] or ('4202' if 'bag' in it['category'].lower() else '6404'),
+                'gst_rate': it['gst_rate'] or 18.0,
+                'unit': it['unit'] or 'Pairs',
+                'total_qty': 0,
+                'total_cost': 0.0,
+                'total_taxable': 0.0,
+                'total_tax': 0.0,
+                'inward_count': 0
+            }
+        q = int(it['quantity'] or 0)
+        c_val = float(it['total_cost'] or 0.0)
+        taxable_v = float(it['taxable_amount'] or (c_val / 1.18))
+        tax_v = float(it['tax_amount'] or (c_val - taxable_v))
+
+        summary_map[key]['total_qty'] += q
+        summary_map[key]['total_cost'] += c_val
+        summary_map[key]['total_taxable'] += taxable_v
+        summary_map[key]['total_tax'] += tax_v
+        summary_map[key]['inward_count'] += 1
+
+        tot_qty += q
+        tot_cost += c_val
+        tot_taxable += taxable_v
+        tot_itc += tax_v
+        bills_set.add(it['invoice_no'])
+
+    product_summary = list(summary_map.values())
+    for p in product_summary:
+        p['avg_unit_cost'] = (p['total_cost'] / p['total_qty']) if p['total_qty'] > 0 else 0.0
+
+    product_summary.sort(key=lambda x: x['total_cost'], reverse=True)
+
+    kpis = {
+        'total_qty': tot_qty,
+        'total_cost': round(tot_cost, 2),
+        'total_taxable': round(tot_taxable, 2),
+        'total_itc': round(tot_itc, 2),
+        'bills_count': len(bills_set),
+        'items_count': len(raw_purchases)
+    }
+
+    settings_data = get_settings()
+    conn.close()
+
+    return render_template('reports_purchases.html',
+                           product_summary=product_summary,
+                           items=raw_purchases,
+                           kpis=kpis,
+                           products_list=products_list,
+                           suppliers_list=suppliers_list,
+                           start_date=start_date,
+                           end_date=end_date,
+                           supplier_id=supplier_id,
+                           product_id=product_id,
+                           category=category,
+                           payment_status=payment_status,
+                           search=search,
+                           view_type=view_type,
+                           settings=settings_data)
+
+
+@app.route('/export/reports/sales/excel')
+@login_required
+@role_required(['ADMIN', 'ACCOUNTING', 'SALESMAN'])
+def export_sales_report_excel():
+    start_date = request.args.get('start_date', '') or None
+    end_date = request.args.get('end_date', '') or None
+    product_id = request.args.get('product_id', '') or None
+    category = request.args.get('category', '') or None
+    payment_mode = request.args.get('payment_mode', '') or None
+    salesman_id = request.args.get('salesman_id', '') or None
+    sale_type = request.args.get('sale_type', '') or None
+    search = request.args.get('search', '').strip() or None
+
+    conn = get_connection()
+    try:
+        file_bytes, filename, mimetype = excel_helpers.generate_sales_report_excel(
+            conn, start_date=start_date, end_date=end_date, product_id=product_id,
+            category=category, payment_mode=payment_mode, salesman_id=salesman_id,
+            sale_type=sale_type, search=search
+        )
+    finally:
+        conn.close()
+
+    return send_file(io.BytesIO(file_bytes), mimetype=mimetype, as_attachment=True, download_name=filename)
+
+
+@app.route('/export/reports/sales/csv')
+@login_required
+@role_required(['ADMIN', 'ACCOUNTING', 'SALESMAN'])
+def export_sales_report_csv():
+    start_date = request.args.get('start_date', '') or None
+    end_date = request.args.get('end_date', '') or None
+    product_id = request.args.get('product_id', '') or None
+    category = request.args.get('category', '') or None
+    payment_mode = request.args.get('payment_mode', '') or None
+    salesman_id = request.args.get('salesman_id', '') or None
+    sale_type = request.args.get('sale_type', '') or None
+    search = request.args.get('search', '').strip() or None
+
+    conn = get_connection()
+    cur = conn.cursor()
+    query = """
+        SELECT 
+            s.created_at, s.invoice_no, s.salesman_name, s.sale_type, s.customer_name, s.customer_phone,
+            COALESCE(NULLIF(s.customer_gst, ''), p.gst_no, '') as customer_gst,
+            s.payment_mode, s.payment_status,
+            si.sku, si.product_name, prod.category, si.size, si.color, si.hsn_code, si.gst_rate,
+            si.quantity, si.unit, si.unit_price, si.total_price, si.taxable_amount,
+            si.cgst_amount, si.sgst_amount, si.igst_amount, si.tax_amount
+        FROM sale_items si
+        JOIN sales s ON si.sale_id = s.id
+        LEFT JOIN parties p ON s.party_id = p.id
+        LEFT JOIN products prod ON si.product_id = prod.id
+        WHERE 1=1
+    """
+    params = []
+    if start_date: query += " AND DATE(s.created_at) >= ?"; params.append(start_date)
+    if end_date: query += " AND DATE(s.created_at) <= ?"; params.append(end_date)
+    if product_id: query += " AND si.product_id = ?"; params.append(product_id)
+    if category: query += " AND LOWER(prod.category) = LOWER(?)"; params.append(category)
+    if payment_mode: query += " AND s.payment_mode = ?"; params.append(payment_mode)
+    if salesman_id: query += " AND s.salesman_id = ?"; params.append(salesman_id)
+    if sale_type: query += " AND s.sale_type = ?"; params.append(sale_type)
+    if search:
+        query += " AND (s.invoice_no LIKE ? OR s.customer_name LIKE ? OR si.product_name LIKE ? OR si.sku LIKE ?)"
+        term = f"%{search}%"; params.extend([term, term, term, term])
+    query += " ORDER BY s.id DESC"
+    cur.execute(query, params)
+    rows = cur.fetchall()
+    conn.close()
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "Date", "Invoice_No", "Salesman", "Sale_Type", "Customer_Name", "Phone", "Buyer_GSTIN",
+        "Payment_Mode", "Payment_Status", "SKU", "Product_Name", "Category", "Size", "Color",
+        "HSN_Code", "GST_Rate", "Quantity", "Unit", "Unit_Price", "Total_Price", "Taxable_Amount",
+        "CGST_Amount", "SGST_Amount", "IGST_Amount", "Total_Tax"
+    ])
+    for r in rows:
+        writer.writerow(list(r))
+    
+    csv_bytes = output.getvalue().encode('utf-8-sig')
+    filename = f"Sales_Report_{start_date or 'All'}_to_{end_date or 'Current'}.csv"
+    return send_file(io.BytesIO(csv_bytes), mimetype='text/csv', as_attachment=True, download_name=filename)
+
+
+@app.route('/export/reports/purchases/excel')
+@login_required
+@role_required(['ADMIN', 'ACCOUNTING', 'WAREHOUSE'])
+def export_purchase_report_excel():
+    start_date = request.args.get('start_date', '') or None
+    end_date = request.args.get('end_date', '') or None
+    supplier_id = request.args.get('supplier_id', '') or None
+    product_id = request.args.get('product_id', '') or None
+    category = request.args.get('category', '') or None
+    payment_status = request.args.get('payment_status', '') or None
+    search = request.args.get('search', '').strip() or None
+
+    conn = get_connection()
+    try:
+        file_bytes, filename, mimetype = excel_helpers.generate_purchase_report_excel(
+            conn, start_date=start_date, end_date=end_date, supplier_id=supplier_id,
+            product_id=product_id, category=category, payment_status=payment_status, search=search
+        )
+    finally:
+        conn.close()
+
+    return send_file(io.BytesIO(file_bytes), mimetype=mimetype, as_attachment=True, download_name=filename)
+
+
+@app.route('/export/reports/purchases/csv')
+@login_required
+@role_required(['ADMIN', 'ACCOUNTING', 'WAREHOUSE'])
+def export_purchase_report_csv():
+    start_date = request.args.get('start_date', '') or None
+    end_date = request.args.get('end_date', '') or None
+    supplier_id = request.args.get('supplier_id', '') or None
+    product_id = request.args.get('product_id', '') or None
+    category = request.args.get('category', '') or None
+    payment_status = request.args.get('payment_status', '') or None
+    search = request.args.get('search', '').strip() or None
+
+    conn = get_connection()
+    cur = conn.cursor()
+    query = """
+        SELECT 
+            p.purchase_date, p.invoice_no, p.supplier_name, pty.phone as supplier_phone,
+            pty.gst_no as supplier_gst, p.payment_status,
+            prod.sku, prod.name as product_name, prod.category,
+            pi.hsn_code, pi.gst_rate, pi.quantity, prod.unit,
+            pi.unit_cost, pi.total_cost, pi.taxable_amount, pi.tax_amount
+        FROM purchase_items pi
+        JOIN purchases p ON pi.purchase_id = p.id
+        LEFT JOIN parties pty ON p.supplier_id = pty.id
+        LEFT JOIN products prod ON pi.product_id = prod.id
+        WHERE 1=1
+    """
+    params = []
+    if start_date: query += " AND DATE(p.purchase_date) >= ?"; params.append(start_date)
+    if end_date: query += " AND DATE(p.purchase_date) <= ?"; params.append(end_date)
+    if supplier_id: query += " AND p.supplier_id = ?"; params.append(supplier_id)
+    if product_id: query += " AND pi.product_id = ?"; params.append(product_id)
+    if category: query += " AND LOWER(prod.category) = LOWER(?)"; params.append(category)
+    if payment_status: query += " AND p.payment_status = ?"; params.append(payment_status)
+    if search:
+        query += " AND (p.invoice_no LIKE ? OR p.supplier_name LIKE ? OR prod.name LIKE ? OR prod.sku LIKE ?)"
+        term = f"%{search}%"; params.extend([term, term, term, term])
+    query += " ORDER BY p.purchase_date DESC, p.id DESC"
+    cur.execute(query, params)
+    rows = cur.fetchall()
+    conn.close()
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "Purchase_Date", "Bill_No", "Supplier_Name", "Supplier_Phone", "Supplier_GSTIN", "Payment_Status",
+        "SKU", "Product_Name", "Category", "HSN_Code", "GST_Rate", "Quantity", "Unit",
+        "Unit_Cost", "Total_Cost", "Taxable_Amount", "Total_Tax"
+    ])
+    for r in rows:
+        writer.writerow(list(r))
+    
+    csv_bytes = output.getvalue().encode('utf-8-sig')
+    filename = f"Purchase_Report_{start_date or 'All'}_to_{end_date or 'Current'}.csv"
+    return send_file(io.BytesIO(csv_bytes), mimetype='text/csv', as_attachment=True, download_name=filename)
+
 # ----------------- FRIENDLY ERROR HANDLERS -----------------
 @app.errorhandler(404)
 def not_found(e):
