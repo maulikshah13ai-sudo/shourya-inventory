@@ -37,20 +37,23 @@ def get_settings():
     if row:
         d = dict(row)
         if not d.get('invoice_prefix'):
-            d['invoice_prefix'] = 'SSIPL'
+            d['invoice_prefix'] = 'SSIPL/2026-27'
         if not d.get('logo_path') or len(d.get('logo_path', '').strip()) == 0:
             d['logo_path'] = default_logo_url
         return d
     return {
-        "shop_name": "SSIPL Bags & Footwear Hub",
-        "tagline": "Wholesale & Retail Dealers in Bags & Footwear",
-        "phone": "+91 98765 43210",
-        "address": "Market Complex",
-        "tax_number": "",
+        "shop_name": "Shourya Stitch Industries Pvt Ltd",
+        "tagline": "The Luggage Depot & The Brande Depot",
+        "phone": "+91 99747 97892",
+        "email": "theluggagedepot@gmail.com",
+        "address": "H.S.HOTELWALA,PIPLAJ SUEZ RD,DANILIMDA,AHMADABAD ,GUJARAT, PIN - 382405",
+        "tax_number": "GSTIN: 24ABHCS7669E1Z0",
         "currency_symbol": "₹",
-        "invoice_prefix": "SSIPL",
+        "invoice_prefix": "SSIPL/2026-27",
+        "state_name": "Gujarat",
+        "state_code": "24",
         "logo_path": default_logo_url,
-        "invoice_footer": "Thank you for shopping with us!"
+        "invoice_footer": "Thank you for your business! No Exchange No Return No Refund"
     }
 
 def get_current_user():
@@ -1933,10 +1936,10 @@ def settings():
         address = request.form.get('address', '').strip()
         tax_number = request.form.get('tax_number', '').strip()
         currency_symbol = request.form.get('currency_symbol', '₹').strip()
-        invoice_prefix = request.form.get('invoice_prefix', 'SSIPL').strip() or 'SSIPL'
+        invoice_prefix = request.form.get('invoice_prefix', 'SSIPL/2026-27').strip() or 'SSIPL/2026-27'
         invoice_footer = request.form.get('invoice_footer', '').strip()
-        state_code = request.form.get('state_code', '27').strip() or '27'
-        state_name = request.form.get('state_name', 'Maharashtra').strip() or 'Maharashtra'
+        state_code = request.form.get('state_code', '24').strip() or '24'
+        state_name = request.form.get('state_name', 'Gujarat').strip() or 'Gujarat'
         remove_logo = request.form.get('remove_logo') == '1'
 
         logo_file = request.files.get('logo')

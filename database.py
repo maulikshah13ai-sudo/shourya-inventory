@@ -43,16 +43,16 @@ def init_db():
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS settings (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        shop_name TEXT NOT NULL DEFAULT 'SSIPL Bags & Footwear Hub',
-        tagline TEXT DEFAULT 'Wholesale & Retail Dealers in Bags & Footwear',
-        phone TEXT DEFAULT '+91 98765 43210',
-        email TEXT DEFAULT 'contact@stepstyle.com',
-        address TEXT DEFAULT 'Shop #12, Market Complex, Wholesale Market',
-        tax_number TEXT DEFAULT 'GSTIN: 27AAAAA0000A1Z5',
+        shop_name TEXT NOT NULL DEFAULT 'Shourya Stitch Industries Pvt Ltd',
+        tagline TEXT DEFAULT 'The Luggage Depot & The Brande Depot',
+        phone TEXT DEFAULT '+91 99747 97892',
+        email TEXT DEFAULT 'theluggagedepot@gmail.com',
+        address TEXT DEFAULT 'H.S.HOTELWALA,PIPLAJ SUEZ RD,DANILIMDA,AHMADABAD ,GUJARAT, PIN - 382405',
+        tax_number TEXT DEFAULT 'GSTIN: 24ABHCS7669E1Z0',
         currency_symbol TEXT DEFAULT '₹',
-        invoice_prefix TEXT DEFAULT 'SSIPL',
+        invoice_prefix TEXT DEFAULT 'SSIPL/2026-27',
         logo_path TEXT DEFAULT '',
-        invoice_footer TEXT DEFAULT 'Thank you for your business! Goods once sold can be exchanged within 7 days with original invoice.',
+        invoice_footer TEXT DEFAULT 'Thank you for your business! No Exchange No Return No Refund',
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
     """)
@@ -63,7 +63,7 @@ def init_db():
     except sqlite3.OperationalError:
         pass
     try:
-        cursor.execute("ALTER TABLE settings ADD COLUMN invoice_prefix TEXT DEFAULT 'SSIPL'")
+        cursor.execute("ALTER TABLE settings ADD COLUMN invoice_prefix TEXT DEFAULT 'SSIPL/2026-27'")
     except sqlite3.OperationalError:
         pass
     try:
@@ -85,8 +85,8 @@ def init_db():
 
     # GST Compliance Columns Migration
     gst_migrations = [
-        ("ALTER TABLE settings ADD COLUMN state_code TEXT DEFAULT '27'", "settings.state_code"),
-        ("ALTER TABLE settings ADD COLUMN state_name TEXT DEFAULT 'Maharashtra'", "settings.state_name"),
+        ("ALTER TABLE settings ADD COLUMN state_code TEXT DEFAULT '24'", "settings.state_code"),
+        ("ALTER TABLE settings ADD COLUMN state_name TEXT DEFAULT 'Gujarat'", "settings.state_name"),
         ("ALTER TABLE products ADD COLUMN hsn_code TEXT DEFAULT '4202'", "products.hsn_code"),
         ("ALTER TABLE products ADD COLUMN gst_rate REAL DEFAULT 18.0", "products.gst_rate"),
         
@@ -129,8 +129,8 @@ def init_db():
         ("ALTER TABLE estimate_items ADD COLUMN taxable_amount REAL DEFAULT 0.0", "estimate_items.taxable_amount"),
         ("ALTER TABLE estimate_items ADD COLUMN tax_amount REAL DEFAULT 0.0", "estimate_items.tax_amount"),
 
-        ("ALTER TABLE parties ADD COLUMN state_code TEXT DEFAULT '27'", "parties.state_code"),
-        ("ALTER TABLE parties ADD COLUMN state_name TEXT DEFAULT 'Maharashtra'", "parties.state_name"),
+        ("ALTER TABLE parties ADD COLUMN state_code TEXT DEFAULT '24'", "parties.state_code"),
+        ("ALTER TABLE parties ADD COLUMN state_name TEXT DEFAULT 'Gujarat'", "parties.state_name"),
         ("ALTER TABLE sales ADD COLUMN customer_gst TEXT DEFAULT ''", "sales.customer_gst"),
         ("ALTER TABLE estimates ADD COLUMN customer_gst TEXT DEFAULT ''", "estimates.customer_gst"),
     ]
@@ -144,8 +144,25 @@ def init_db():
     cursor.execute("UPDATE products SET hsn_code = '4202', gst_rate = 18.0 WHERE category = 'Bags' AND (hsn_code IS NULL OR hsn_code = '' OR hsn_code = '4202')")
     cursor.execute("UPDATE products SET hsn_code = '6404', gst_rate = 18.0 WHERE category = 'Shoes' AND (hsn_code IS NULL OR hsn_code = '' OR hsn_code = '4202')")
 
-    # Ensure shop name is updated to SSIPL
-    cursor.execute("UPDATE settings SET shop_name = 'SSIPL Bags & Footwear Hub' WHERE shop_name LIKE '%Apex%'")
+    # Ensure default shop settings are set to Shourya Stitch Industries Pvt Ltd
+    cursor.execute("""
+        UPDATE settings SET 
+            shop_name = 'Shourya Stitch Industries Pvt Ltd',
+            tagline = 'The Luggage Depot & The Brande Depot',
+            tax_number = 'GSTIN: 24ABHCS7669E1Z0',
+            state_name = 'Gujarat',
+            state_code = '24',
+            invoice_prefix = 'SSIPL/2026-27',
+            invoice_footer = 'Thank you for your business! No Exchange No Return No Refund',
+            phone = '+91 99747 97892',
+            email = 'theluggagedepot@gmail.com',
+            address = 'H.S.HOTELWALA,PIPLAJ SUEZ RD,DANILIMDA,AHMADABAD ,GUJARAT, PIN - 382405'
+        WHERE shop_name IN ('SSIPL Bags & Footwear Hub', 'Apex Footwear & Bags Hub', 'Shourya Stitch Industries Pvt Ltd')
+           OR tax_number LIKE '%27AAAAA0000A1Z5%'
+           OR state_name = 'Maharashtra'
+           OR phone = '+91 98765 43210'
+           OR email = 'contact@stepstyle.com'
+    """)
     cursor.execute("UPDATE users SET full_name = 'Sales Staff 1' WHERE username = 'sales1' AND full_name = 'Floor Salesman'")
 
     # Set default logo from static/img/logo.png if logo_path is empty or missing
@@ -347,7 +364,10 @@ def init_db():
     # Check if settings exists
     cursor.execute("SELECT COUNT(*) FROM settings")
     if cursor.fetchone()[0] == 0:
-        cursor.execute("INSERT INTO settings (shop_name) VALUES ('SSIPL Bags & Footwear Hub')")
+        cursor.execute("""
+            INSERT INTO settings (shop_name, tagline, phone, email, address, tax_number, currency_symbol, invoice_prefix, state_name, state_code, invoice_footer)
+            VALUES ('Shourya Stitch Industries Pvt Ltd', 'The Luggage Depot & The Brande Depot', '+91 99747 97892', 'theluggagedepot@gmail.com', 'H.S.HOTELWALA,PIPLAJ SUEZ RD,DANILIMDA,AHMADABAD ,GUJARAT, PIN - 382405', 'GSTIN: 24ABHCS7669E1Z0', '₹', 'SSIPL/2026-27', 'Gujarat', '24', 'Thank you for your business! No Exchange No Return No Refund')
+        """)
 
     # Check and seed default role users
     cursor.execute("SELECT COUNT(*) FROM users")
@@ -378,31 +398,39 @@ def init_db():
     seed_sample_data(conn)
     conn.close()
 
-def get_next_invoice_number(conn, prefix='SSIPL', year_str=None):
+def get_next_invoice_number(conn, prefix='SSIPL/2026-27', year_str=None):
     """
     Thread-safe & concurrency-safe atomic invoice generator.
     Guarantees that when 10 salesmen checkout at the same millisecond,
-    each invoice receives a strictly consecutive, unique number (e.g. SSIPL-2026-0001).
+    each invoice receives a strictly consecutive, unique number (e.g. SSIPL/2026-27/0001 or SSIPL-2026-0001).
     """
+    clean_prefix = (prefix or 'SSIPL/2026-27').strip()
     if not year_str:
         year_str = datetime.now().strftime("%Y")
-    clean_prefix = (prefix or 'SSIPL').strip()
-    seq_key = f"{clean_prefix}-{year_str}"
+
+    if '/' in clean_prefix:
+        seq_key = clean_prefix.rstrip('/')
+        format_func = lambda num: f"{seq_key}/{num:04d}"
+    else:
+        seq_key = f"{clean_prefix}-{year_str}"
+        format_func = lambda num: f"{clean_prefix}-{year_str}-{num:04d}"
 
     cur = conn.cursor()
     # Initialize sequence row if not present, seeding from highest existing bill number
     cur.execute("SELECT current_val FROM invoice_sequences WHERE sequence_key = ?", (seq_key,))
     row = cur.fetchone()
     if row is None:
-        cur.execute("SELECT invoice_no FROM sales WHERE invoice_no LIKE ?", (f"{seq_key}-%",))
+        cur.execute("SELECT invoice_no FROM sales WHERE invoice_no LIKE ?", (f"{seq_key}%",))
         sales = cur.fetchall()
         max_num = 0
         for s in sales:
             try:
-                parts = s['invoice_no'].split('-')
-                num = int(parts[-1])
-                if num > max_num:
-                    max_num = num
+                parts = s['invoice_no'].replace('/', '-').split('-')
+                digits = [p for p in parts if p.isdigit()]
+                if digits:
+                    num = int(digits[-1])
+                    if num > max_num:
+                        max_num = num
             except (ValueError, IndexError, TypeError, KeyError):
                 pass
         cur.execute("INSERT OR REPLACE INTO invoice_sequences (sequence_key, current_val) VALUES (?, ?)", (seq_key, max_num))
@@ -411,7 +439,7 @@ def get_next_invoice_number(conn, prefix='SSIPL', year_str=None):
     cur.execute("UPDATE invoice_sequences SET current_val = current_val + 1 WHERE sequence_key = ?", (seq_key,))
     cur.execute("SELECT current_val FROM invoice_sequences WHERE sequence_key = ?", (seq_key,))
     next_val = cur.fetchone()[0]
-    return f"{clean_prefix}-{year_str}-{next_val:04d}"
+    return format_func(next_val)
 
 def seed_sample_data(conn):
     cursor = conn.cursor()

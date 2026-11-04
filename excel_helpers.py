@@ -603,8 +603,8 @@ def generate_gstr1_excel_report(conn, start_date=None, end_date=None):
     cur.execute("SELECT * FROM settings ORDER BY id ASC LIMIT 1")
     settings = dict(cur.fetchone())
     shop_gstin = settings.get('tax_number', '').replace('GSTIN:', '').strip()
-    shop_state = settings.get('state_name', 'Maharashtra')
-    shop_state_code = settings.get('state_code', '27')
+    shop_state = settings.get('state_name', 'Gujarat')
+    shop_state_code = settings.get('state_code', '24')
 
     query = """
         SELECT s.id, s.invoice_no, s.sale_type, s.customer_name, s.customer_phone,
@@ -951,7 +951,7 @@ def generate_sales_report_excel(conn, start_date=None, end_date=None, product_id
     cur = conn.cursor()
     cur.execute("SELECT * FROM settings ORDER BY id ASC LIMIT 1")
     settings = dict(cur.fetchone()) if cur.rowcount != 0 else {}
-    shop_name = settings.get('shop_name', 'SSIPL Bags & Footwear Hub')
+    shop_name = settings.get('shop_name', 'Shourya Stitch Industries Pvt Ltd')
 
     # Base query for itemized records
     item_query = """
@@ -1206,7 +1206,7 @@ def generate_purchase_report_excel(conn, start_date=None, end_date=None, supplie
     cur = conn.cursor()
     cur.execute("SELECT * FROM settings ORDER BY id ASC LIMIT 1")
     settings = dict(cur.fetchone()) if cur.rowcount != 0 else {}
-    shop_name = settings.get('shop_name', 'SSIPL Bags & Footwear Hub')
+    shop_name = settings.get('shop_name', 'Shourya Stitch Industries Pvt Ltd')
 
     pur_query = """
         SELECT 

@@ -17,8 +17,8 @@
                     Generate CA-ready GSTR-1 Excel returns, review Table 12 HSN summaries, and track monthly GSTR-3B tax liabilities and Input Tax Credit (ITC).
                 </p>
                 <div class="mt-3 flex flex-wrap gap-4 text-xs text-purple-200/90 font-mono">
-                    <span>GSTIN: <b class="text-white">{{ settings.tax_number or '27AAAAA0000A1Z5' }}</b></span>
-                    <span>State: <b class="text-white">{{ settings.state_name or 'Maharashtra' }} (Code: {{ settings.state_code or '27' }})</b></span>
+                    <span>GSTIN: <b class="text-white">{{ settings.tax_number or 'GSTIN: 24ABHCS7669E1Z0' }}</b></span>
+                    <span>State: <b class="text-white">{{ settings.state_name or 'Gujarat' }} (Code: {{ settings.state_code or '24' }})</b></span>
                 </div>
                 <div class="mt-4 flex flex-wrap items-center gap-2 text-xs">
                     <a href="{{ url_for('sales_report') }}" class="px-4 py-1.5 rounded-full font-semibold bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white transition flex items-center gap-1.5">

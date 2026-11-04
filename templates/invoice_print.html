@@ -43,7 +43,7 @@
                     {% if settings.address %}<p>{{ settings.address }}</p>{% endif %}
                     {% if settings.phone %}<p><span class="font-bold">Phone:</span> {{ settings.phone }}</p>{% endif %}
                     {% if settings.tax_number %}<p class="font-mono font-bold text-slate-800">{{ settings.tax_number }}</p>{% endif %}
-                    <p class="text-[11px] text-slate-500 font-medium">State: <span class="font-bold text-slate-700">{{ settings.state_name or 'Maharashtra' }}</span> (State Code: <span class="font-mono font-bold text-slate-700">{{ settings.state_code or '27' }}</span>)</p>
+                    <p class="text-[11px] text-slate-500 font-medium">State: <span class="font-bold text-slate-700">{{ settings.state_name or 'Gujarat' }}</span> (State Code: <span class="font-mono font-bold text-slate-700">{{ settings.state_code or '24' }}</span>)</p>
                 </div>
             </div>
 
@@ -76,7 +76,7 @@
                 {% if party and party.address %}<p class="text-slate-500">{{ party.address }}</p>{% endif %}
                 {% if party and party.gst_no %}<p class="text-slate-700 font-mono font-bold mt-0.5">GSTIN / UIN: {{ party.gst_no }}</p>{% endif %}
                 <p class="text-slate-500 mt-0.5">
-                    Place of Supply: <span class="font-semibold text-slate-700">{{ (party.state_name if party and party.state_name else (settings.state_name or 'Maharashtra')) }} (Code: {{ (party.state_code if party and party.state_code else (settings.state_code or '27')) }})</span>
+                    Place of Supply: <span class="font-semibold text-slate-700">{{ (party.state_name if party and party.state_name else (settings.state_name or 'Gujarat')) }} (Code: {{ (party.state_code if party and party.state_code else (settings.state_code or '24')) }})</span>
                 </p>
             </div>
             {% if party and sale.sale_type == 'WHOLESALE' %}
